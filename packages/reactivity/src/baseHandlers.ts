@@ -105,6 +105,7 @@ function createGetter(isReadonly = false, shallow = false) {
       return res
     }
 
+    //ref解套,目标对象为数组或key为Number类型,则value不能解套
     if (isRef(res)) {
       // ref unwrapping - does not apply for Array + integer key.
       const shouldUnwrap = !targetIsArray || !isIntegerKey(key)

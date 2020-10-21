@@ -48,19 +48,25 @@ let activeEffect: ReactiveEffect | undefined
 export const ITERATE_KEY = Symbol(__DEV__ ? 'iterate' : '')
 export const MAP_KEY_ITERATE_KEY = Symbol(__DEV__ ? 'Map key iterate' : '')
 
+//判断fn 是否是effect函数,判断标识为_isEffect属性,如果不是,则没有该属性标识
 export function isEffect(fn: any): fn is ReactiveEffect {
   return fn && fn._isEffect === true
 }
 
+//
 export function effect<T = any>(
   fn: () => T,
   options: ReactiveEffectOptions = EMPTY_OBJ
 ): ReactiveEffect<T> {
+  //如果fn 已经是一个effect,则直接从raw获取,则不用去重新创建(已经创建过了,可以理解为直接从缓存中拿)
   if (isEffect(fn)) {
     fn = fn.raw
   }
+  //去初始化 effect (createReactiveEffect)
   const effect = createReactiveEffect(fn, options)
+  //这里就是optins选项,默认effect会立即执行,可以设置lazy
   if (!options.lazy) {
+    //立即执行一次 effect
     effect()
   }
   return effect
@@ -78,10 +84,12 @@ export function stop(effect: ReactiveEffect) {
 
 let uid = 0
 
+//创建 effect
 function createReactiveEffect<T = any>(
   fn: () => T,
   options: ReactiveEffectOptions
 ): ReactiveEffect<T> {
+  //effect 函数体
   const effect = function reactiveEffect(): unknown {
     if (!effect.active) {
       return options.scheduler ? undefined : fn()
@@ -89,22 +97,25 @@ function createReactiveEffect<T = any>(
     if (!effectStack.includes(effect)) {
       cleanup(effect)
       try {
+        //effect 入栈,并激活为 activeEffect,然后执行fn effect回调
         enableTracking()
         effectStack.push(effect)
         activeEffect = effect
         return fn()
       } finally {
+        //effect 回调执行完后(触发依赖更新完成,effect出栈)
         effectStack.pop()
         resetTracking()
         activeEffect = effectStack[effectStack.length - 1]
       }
     }
   } as ReactiveEffect
+  //函数也是对象类型,因此可以给effect扩展一些属性
   effect.id = uid++
   effect.allowRecurse = !!options.allowRecurse
-  effect._isEffect = true
+  effect._isEffect = true //effect 标识
   effect.active = true
-  effect.raw = fn
+  effect.raw = fn //缓存 fn
   effect.deps = []
   effect.options = options
   return effect
@@ -137,22 +148,30 @@ export function resetTracking() {
   const last = trackStack.pop()
   shouldTrack = last === undefined ? true : last
 }
-
+//最终会将 activeEffect 存入 targetMap 集合,这个过程被称为 "依赖收集"
 export function track(target: object, type: TrackOpTypes, key: unknown) {
+  //shouldTrack 为false 或者 activeEffect 为 undefined 则直接return,说明无新依赖项要被收集
   if (!shouldTrack || activeEffect === undefined) {
     return
   }
+  //检索Ref实例对象是否被追踪过
   let depsMap = targetMap.get(target)
+  //如果没有,则创建一条记录
   if (!depsMap) {
-    targetMap.set(target, (depsMap = new Map()))
+    targetMap.set(target, (depsMap = new Map())) // targetMap : [[target:Ref实例对象/proxy代理对象,depsMap:Map实例]]
   }
+  //检索实例对象.key(也就是RefInstance.value) 是否被追踪过
   let dep = depsMap.get(key)
+  //没有则创建一条记录,set进targetMap(Ref中value作为key)
   if (!dep) {
-    depsMap.set(key, (dep = new Set()))
+    depsMap.set(key, (dep = new Set())) //depsMap : [['value',[fn]: set]]
   }
+  //依赖中如果没有添加过activeEffect(fn),则add进dep
   if (!dep.has(activeEffect)) {
     dep.add(activeEffect)
-    activeEffect.deps.push(dep)
+
+    activeEffect.deps.push(dep) // deps: [[fn,...],...] fn: activeEffect
+    //执行调试
     if (__DEV__ && activeEffect.options.onTrack) {
       activeEffect.options.onTrack({
         effect: activeEffect,
@@ -164,6 +183,7 @@ export function track(target: object, type: TrackOpTypes, key: unknown) {
   }
 }
 
+//触发依赖，使用 targetMap
 export function trigger(
   target: object,
   type: TriggerOpTypes,
@@ -172,13 +192,16 @@ export function trigger(
   oldValue?: unknown,
   oldTarget?: Map<unknown, unknown> | Set<unknown>
 ) {
+  //检索依赖,如果依赖不存在直接return ['value',[fn,...]]
   const depsMap = targetMap.get(target)
   if (!depsMap) {
     // never been tracked
     return
   }
 
+  //初始化一个effects set集合,用来收集即将要触发的effect
   const effects = new Set<ReactiveEffect>()
+  //add effect into effects
   const add = (effectsToAdd: Set<ReactiveEffect> | undefined) => {
     if (effectsToAdd) {
       effectsToAdd.forEach(effect => {
@@ -201,7 +224,9 @@ export function trigger(
     })
   } else {
     // schedule runs for SET | ADD | DELETE
+    // key 如果不等于 undefined,执行 effect add  effects操作
     if (key !== void 0) {
+      //void 0 = undefined
       add(depsMap.get(key))
     }
 
@@ -234,6 +259,7 @@ export function trigger(
     }
   }
 
+  //执行effect的 forEach回调函数
   const run = (effect: ReactiveEffect) => {
     if (__DEV__ && effect.options.onTrigger) {
       effect.options.onTrigger({
@@ -252,6 +278,6 @@ export function trigger(
       effect()
     }
   }
-
+  //迭代触发effects 中的effect
   effects.forEach(run)
 }
