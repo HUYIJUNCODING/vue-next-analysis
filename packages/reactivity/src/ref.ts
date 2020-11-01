@@ -94,7 +94,7 @@ function createRef(rawValue: unknown, shallow = false) {
   //创建Ref实例
   return new RefImpl(rawValue, shallow)
 }
-
+//触发依赖更新
 export function triggerRef(ref: Ref) {
   trigger(toRaw(ref), TriggerOpTypes.SET, 'value', __DEV__ ? ref.value : void 0)
 }
@@ -102,6 +102,7 @@ export function triggerRef(ref: Ref) {
 export function unref<T>(ref: T): T extends Ref<infer V> ? V : T {
   return isRef(ref) ? (ref.value as any) : ref
 }
+
 
 const shallowUnwrapHandlers: ProxyHandler<any> = {
   get: (target, key, receiver) => unref(Reflect.get(target, key, receiver)),
@@ -133,6 +134,7 @@ export type CustomRefFactory<T> = (
   set: (value: T) => void
 }
 
+//创建自定义Ref实例对象的工厂类
 class CustomRefImpl<T> {
   private readonly _get: ReturnType<CustomRefFactory<T>>['get']
   private readonly _set: ReturnType<CustomRefFactory<T>>['set']
