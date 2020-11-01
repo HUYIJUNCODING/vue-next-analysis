@@ -28,6 +28,7 @@ const toShallow = <T extends unknown>(value: T): T => value
 const getProto = <T extends CollectionTypes>(v: T): any =>
   Reflect.getPrototypeOf(v)
 
+//proxy代理的get方法
 function get(
   target: MapTypes,
   key: unknown,
@@ -232,6 +233,7 @@ function createReadonlyMethod(type: TriggerOpTypes): Function {
   }
 }
 
+//需要监听的集合方法调用
 const mutableInstrumentations: Record<string, Function> = {
   get(this: MapTypes, key: unknown) {
     return get(this, key)
@@ -247,6 +249,7 @@ const mutableInstrumentations: Record<string, Function> = {
   forEach: createForEach(false, false)
 }
 
+//浅模式下需要监听的集合方法调用
 const shallowInstrumentations: Record<string, Function> = {
   get(this: MapTypes, key: unknown) {
     return get(this, key, false, true)
@@ -261,7 +264,7 @@ const shallowInstrumentations: Record<string, Function> = {
   clear,
   forEach: createForEach(false, true)
 }
-
+//只读模式下需要监听的集合方法调用
 const readonlyInstrumentations: Record<string, Function> = {
   get(this: MapTypes, key: unknown) {
     return get(this, key, true)
@@ -278,7 +281,7 @@ const readonlyInstrumentations: Record<string, Function> = {
   clear: createReadonlyMethod(TriggerOpTypes.CLEAR),
   forEach: createForEach(true, false)
 }
-
+//集合的迭代方法调用
 const iteratorMethods = ['keys', 'values', 'entries', Symbol.iterator]
 iteratorMethods.forEach(method => {
   mutableInstrumentations[method as string] = createIterableMethod(
@@ -297,7 +300,7 @@ iteratorMethods.forEach(method => {
     true
   )
 })
-
+//创建getter
 function createInstrumentationGetter(isReadonly: boolean, shallow: boolean) {
   const instrumentations = shallow
     ? shallowInstrumentations
@@ -317,7 +320,8 @@ function createInstrumentationGetter(isReadonly: boolean, shallow: boolean) {
     } else if (key === ReactiveFlags.RAW) {
       return target
     }
-
+      // 如果是`get`、`has`、`add`、`set`、`delete`、`clear`、`forEach`的方法调用，或者是获取`size`，
+      //那么改为调用mutableInstrumentations里的相关方法,否则是正常的获取响应式集合的属性
     return Reflect.get(
       hasOwn(instrumentations, key) && key in target
         ? instrumentations
@@ -340,6 +344,7 @@ export const readonlyCollectionHandlers: ProxyHandler<CollectionTypes> = {
   get: createInstrumentationGetter(true, false)
 }
 
+//检测集合中是否已经存在相同key
 function checkIdentityKeys(
   target: CollectionTypes,
   has: (key: unknown) => boolean,

@@ -61,17 +61,19 @@ type UnwrapNestedRefs<T> = T extends Ref ? T : UnwrapRef<T>
 
 export function reactive<T extends object>(target: T): UnwrapNestedRefs<T>
 
-//
+//接收一个普通对象然后返回该普通对象的响应式代理.
 export function reactive(target: object) {
   // if trying to observe a readonly proxy, return the readonly version.
+  //如果target是一个只读代理对象,则将其直接返回
   if (target && (target as Target)[ReactiveFlags.IS_READONLY]) {
     return target
   }
+  //调用createReactiveObject创建reactive对象
   return createReactiveObject(
-    target,
-    false,
-    mutableHandlers,
-    mutableCollectionHandlers
+    target,//目标对象
+    false,//目标对象是否只读
+    mutableHandlers,//响应式数据的代理handler，一般是Object和Array
+    mutableCollectionHandlers// 响应式集合的代理handler，一般是Set、Map、WeakMap、WeakSet
   )
 }
 
@@ -134,13 +136,14 @@ export function shallowReadonly<T extends object>(
     readonlyCollectionHandlers
   )
 }
-
+//接收一个普通对象然后返回该普通对象的响应式代理。等同于 2.x 的 Vue.observable()
 function createReactiveObject(
   target: Target,
   isReadonly: boolean,
   baseHandlers: ProxyHandler<any>,
   collectionHandlers: ProxyHandler<any>
 ) {
+  //如果不是对象,则直接返回,非对象类型不能代理(开发环境下会给出警告)
   if (!isObject(target)) {
     if (__DEV__) {
       console.warn(`value cannot be made reactive: ${String(target)}`)
@@ -149,6 +152,7 @@ function createReactiveObject(
   }
   // target is already a Proxy, return it.
   // exception: calling readonly() on a reactive object
+  //如果目标对象是一个非只读的proxy代理(响应式代理),则直接返回(传入的本身就是一个proxy代理，就不能去再去代理)
   if (
     target[ReactiveFlags.RAW] &&
     !(isReadonly && target[ReactiveFlags.IS_REACTIVE])
@@ -156,24 +160,31 @@ function createReactiveObject(
     return target
   }
   // target already has corresponding Proxy
+  //如果目标对象已经有了相应的proxy代理(首次 createReactive 时候会往 readonlyMap或者reactiveMap 存入rawObj -> proxy 关系,所以可以检测出来)
   const proxyMap = isReadonly ? readonlyMap : reactiveMap
   const existingProxy = proxyMap.get(target)
   if (existingProxy) {
     return existingProxy
   }
   // only a whitelist of value types can be observed.
+  //getTargetType 方法内部会调用 targetTypeMap方法,然后会对target类型进行归类并返回其类型
+  //Object,Array -> 1,Map,WeakMap,Set,WeakSet - > 2,其他无效类型(INVALID:无效类型)-> 0
+  //如果传入的target类型无效则直接返回target
   const targetType = getTargetType(target)
   if (targetType === TargetType.INVALID) {
     return target
   }
+  //创建代理对象并返回代理对象,这里需要注意集合类型和Object/Array的响应式handler(第二个参数),内部会有不同
   const proxy = new Proxy(
     target,
     targetType === TargetType.COLLECTION ? collectionHandlers : baseHandlers
   )
+  //建立rawOject->proxy映射关系并存入 readonlyMap/reactiveMap
   proxyMap.set(target, proxy)
   return proxy
 }
 
+//检查一个对象是否是由 reactive 创建的响应式代理
 export function isReactive(value: unknown): boolean {
   if (isReadonly(value)) {
     return isReactive((value as Target)[ReactiveFlags.RAW])

@@ -8,18 +8,18 @@ declare const RefSymbol: unique symbol
 
 //定义Ref类型形状(Ref类型接口)
 export interface Ref<T = any> {
-  value: T
+  value: T //响应式包装对象的value属性，是解包装的值
   /**
    * Type differentiator only.
    * We need this to be in public d.ts but don't want it to show up in IDE
    * autocomplete, so we use a private Symbol instead.
    */
-  [RefSymbol]: true
+  [RefSymbol]: true //用一个symbol来标识ref对象，但是后面又被改成了通过_isRef属性来标识
   /**
    * @internal
    */
 
-  _shallow?: boolean
+  _shallow?: boolean //标识是否是浅模式
 }
 
 export type ToRefs<T = any> = { [K in keyof T]: Ref<T[K]> }
@@ -29,7 +29,7 @@ const convert = <T extends unknown>(val: T): T =>
   isObject(val) ? reactive(val) : val
 
 export function isRef<T>(r: Ref<T> | unknown): r is Ref<T>
-//判断是否是Ref类型,如果已经是,创建的时候会添加__v_isRef:true属性
+//判断是否是Ref类型,通过__v_isRef属性(创建Ref包装对象的时候会添加__v_isRef:true标识)
 export function isRef(r: any): r is Ref {
   return Boolean(r && r.__v_isRef === true)
 }
@@ -42,10 +42,11 @@ export function ref<T>(value: T): Ref<UnwrapRef<T>>
 export function ref<T = any>(): Ref<T | undefined>
 //ref方法
 export function ref(value?: unknown) {
-  //创建Ref实例
+  //创建Ref实例对象(包装对象)
   return createRef(value)
 }
 
+//浅模式(shallow:true)创建Ref包装对象
 export function shallowRef<T extends object>(
   value: T
 ): T extends Ref ? T : Ref<T>
