@@ -70,7 +70,7 @@ class RefImpl<T> {
   }
   //get value
   get value() {
-    //依赖收集(收集.value 变更时的effect依赖)
+    //track调用,用来触发依赖收集(收集.value 变更时的effect依赖)
     track(toRaw(this), TrackOpTypes.GET, 'value')
     return this._value
   }
@@ -80,7 +80,7 @@ class RefImpl<T> {
     if (hasChanged(toRaw(newVal), this._rawValue)) {
       this._rawValue = newVal
       this._value = this._shallow ? newVal : convert(newVal)
-      //触发依赖去更新(遍历执行所有对.value操作依赖的effect)
+      //trigger通知deps 触发依赖去更新(遍历执行所有对.value操作依赖的effect)
       trigger(toRaw(this), TriggerOpTypes.SET, 'value', newVal)
     }
   }
@@ -167,7 +167,7 @@ export function customRef<T>(factory: CustomRefFactory<T>): Ref<T> {
 
 //把一个响应式对象转换成普通对象，该普通对象的每个 property 都是一个 ref ，和响应式对象 property 一一对应。
 export function toRefs<T extends object>(object: T): ToRefs<T> {
-  //__DEV__:全局变量,默认为true,object必须是一个proxy代理
+  //__DEV__:全局变量,默认为true,object必须是一个proxy代理(开发模式下,传入目标如果不是对象类型,会报警告!)
   if (__DEV__ && !isProxy(object)) {
     console.warn(`toRefs() expects a reactive object but received a plain one.`)
   }
@@ -177,7 +177,9 @@ export function toRefs<T extends object>(object: T): ToRefs<T> {
   for (const key in object) {
     ret[key] = toRef(object, key)
   }
-  //返回结果
+  //返回ret(ret是一个属性/元素均为Ref类型的对象/数组)
+  //从一个组合逻辑函数中返回响应式对象时，用 toRefs 是很有效的，
+  //该 API 让消费组件可以 解构 / 扩展（使用 ... 操作符）返回的对象，并不会丢失响应性
   return ret
 }
 

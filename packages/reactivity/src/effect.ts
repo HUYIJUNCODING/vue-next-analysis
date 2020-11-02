@@ -9,24 +9,26 @@ type Dep = Set<ReactiveEffect>
 type KeyToDepMap = Map<any, Dep>
 const targetMap = new WeakMap<any, KeyToDepMap>()
 
+//定义effect类型
 export interface ReactiveEffect<T = any> {
-  (): T
-  _isEffect: true
-  id: number
-  active: boolean
-  raw: () => T
-  deps: Array<Dep>
-  options: ReactiveEffectOptions
-  allowRecurse: boolean
+  (): T //ReactiveEffect函数
+  _isEffect: true //用来标识是effect类型
+  id: number //id号
+  active: boolean //active是effect激活的开关，打开会收集依赖，关闭会导致收集依赖无效
+  raw: () => T // 原始监听函数
+  deps: Array<Dep>// 存储依赖(effect)的deps
+  options: ReactiveEffectOptions // 相关选项
+  allowRecurse: boolean//是否允许递归
 }
 
+//定义effectOptions类型
 export interface ReactiveEffectOptions {
-  lazy?: boolean
-  scheduler?: (job: ReactiveEffect) => void
-  onTrack?: (event: DebuggerEvent) => void
-  onTrigger?: (event: DebuggerEvent) => void
-  onStop?: () => void
-  allowRecurse?: boolean
+  lazy?: boolean// 延迟计算的标识(默认false,开启的话,effect函数不会立刻执行一次,会延迟到依赖关系被触发时才执行)
+  scheduler?: (job: ReactiveEffect) => void// 自定义的依赖收集函数，一般用于外部引入@vue/reactivity时使用
+  onTrack?: (event: DebuggerEvent) => void // 本地调试钩子(仅在开发模式下生效)
+  onTrigger?: (event: DebuggerEvent) => void // 本地调试钩子(仅在开发模式下生效)
+  onStop?: () => void //本地调试时钩子(仅在开发模式下生效)
+  allowRecurse?: boolean//是否允许递归
 }
 
 export type DebuggerEvent = {
@@ -42,42 +44,48 @@ export interface DebuggerEventExtraInfo {
   oldTarget?: Map<any, any> | Set<any>
 }
 
+//effectStack用于存放所有effect的数组
 const effectStack: ReactiveEffect[] = []
+//当前被激活的effect
 let activeEffect: ReactiveEffect | undefined
 
 export const ITERATE_KEY = Symbol(__DEV__ ? 'iterate' : '')
 export const MAP_KEY_ITERATE_KEY = Symbol(__DEV__ ? 'Map key iterate' : '')
 
-//判断fn 是否是effect函数,判断标识为_isEffect属性,如果不是,则没有该属性标识
+//判断一个含漱液是否是effect,判断标识为_isEffect属性,如果不是,则没有该属性标识
 export function isEffect(fn: any): fn is ReactiveEffect {
   return fn && fn._isEffect === true
 }
 
-//
+//effect函数(依赖监听函数)
 export function effect<T = any>(
-  fn: () => T,
-  options: ReactiveEffectOptions = EMPTY_OBJ
+  fn: () => T,//监听函数(其实这里称呼为副作用函数更为贴切,官方文档就是这样叫的)
+  options: ReactiveEffectOptions = EMPTY_OBJ //选项 
 ): ReactiveEffect<T> {
   //如果fn 已经是一个effect,则直接从raw获取,则不用去重新创建(已经创建过了,可以理解为直接从缓存中拿)
   if (isEffect(fn)) {
     fn = fn.raw
   }
-  //去初始化 effect (createReactiveEffect)
+  //初始化 effect (createReactiveEffect)
   const effect = createReactiveEffect(fn, options)
   //这里就是optins选项,默认effect会立即执行,可以设置lazy
   if (!options.lazy) {
-    //立即执行一次 effect
     effect()
   }
   return effect
 }
 
+//停止侦听的函数(该函数会在watch/watchEffect返回的函数中调用,例如官方文档所说的stop(),内部就是调用的是该函数来停止依赖监听)
 export function stop(effect: ReactiveEffect) {
+    // 如果当前effect是active的,则清除其内部所有依赖(清空deps)
   if (effect.active) {
+     // 清除effect的所有依赖
     cleanup(effect)
+     // 如果有onStop钩子，调用该钩子函数(会最为选项参数传入)
     if (effect.options.onStop) {
       effect.options.onStop()
     }
+    // active标记为false，标识这个effect已经停止收集依赖了(停止了依赖监听)
     effect.active = false
   }
 }
@@ -89,8 +97,9 @@ function createReactiveEffect<T = any>(
   fn: () => T,
   options: ReactiveEffectOptions
 ): ReactiveEffect<T> {
-  //effect 函数体
+  //初始化 effect 函数(effect本身是一个函数,因为函数也是object类型,因此在其上又可以扩展一些有用属性)
   const effect = function reactiveEffect(): unknown {
+    //当active标记为false，直接调用原始监听函数
     if (!effect.active) {
       return options.scheduler ? undefined : fn()
     }
@@ -110,7 +119,7 @@ function createReactiveEffect<T = any>(
       }
     }
   } as ReactiveEffect
-  //函数也是对象类型,因此可以给effect扩展一些属性
+  //函数也是对象类型,因此可以给effect扩展一些有用的属性
   effect.id = uid++
   effect.allowRecurse = !!options.allowRecurse
   effect._isEffect = true //effect 标识
@@ -130,7 +139,7 @@ function cleanup(effect: ReactiveEffect) {
     deps.length = 0
   }
 }
-
+//全局开关变量，默认打开track，如果关闭track，则会导致 Vue 内部停止对变化进行追踪
 let shouldTrack = true
 const trackStack: boolean[] = []
 
@@ -150,28 +159,29 @@ export function resetTracking() {
 }
 //最终会将 activeEffect 存入 targetMap 集合,这个过程被称为 "依赖收集"
 export function track(target: object, type: TrackOpTypes, key: unknown) {
-  //shouldTrack 为false 或者 activeEffect 为 undefined 则直接return,说明无新依赖项要被收集
+  //shouldTrack 开关关闭 或者 activeEffect 为 undefined 则直接return,说明无依赖项要被收集
   if (!shouldTrack || activeEffect === undefined) {
     return
   }
-  //检索Ref实例对象是否被追踪过
+  //targetMap用来存放target响应式对象与dep依赖关系的集合
   let depsMap = targetMap.get(target)
-  //如果没有,则创建一条记录
+  //如果depsMap不存在,则以target为key,new Map()为value,创建一条target的依赖空记录(depsMap为空map集合)
   if (!depsMap) {
     targetMap.set(target, (depsMap = new Map())) // targetMap : [[target:Ref实例对象/proxy代理对象,depsMap:Map实例]]
   }
   //检索实例对象.key(也就是RefInstance.value) 是否被追踪过
+  //如果当前key在depsMap中未记录过,说明depsMap中未收集过关于此key的依赖关系,则创建一条当前key的空依赖记录
   let dep = depsMap.get(key)
   //没有则创建一条记录,set进targetMap(Ref中value作为key)
   if (!dep) {
     depsMap.set(key, (dep = new Set())) //depsMap : [['value',[fn]: set]]
   }
-  //依赖中如果没有添加过activeEffect(fn),则add进dep
+  //dep是存放依赖函数effect的集合,先判断是否已存在此依赖,如果没有,则添加进来(依赖收集最核心地方)
   if (!dep.has(activeEffect)) {
     dep.add(activeEffect)
-
-    activeEffect.deps.push(dep) // deps: [[fn,...],...] fn: activeEffect
-    //执行调试
+    //更新effect里的deps属性,将dep也放到effect.deps里，用于描述当前响应式对象的依赖
+    activeEffect.deps.push(dep) // deps: [[fn,...],...] fn: effect
+    //开发环境下，触发相应的钩子函数(调试钩子)
     if (__DEV__ && activeEffect.options.onTrack) {
       activeEffect.options.onTrack({
         effect: activeEffect,
