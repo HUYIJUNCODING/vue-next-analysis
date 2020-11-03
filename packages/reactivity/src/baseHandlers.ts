@@ -78,7 +78,8 @@ function createGetter(isReadonly = false, shallow = false) {
       //如果key为 '__v_isReadonly',则返回true(isReadonly)
     } else if (key === ReactiveFlags.IS_READONLY) {
       return isReadonly
-      //如果 key 为 '__v_raw',并且 代理对象的 receiver 在 readonlyMap/reactiveMap找的到(说明是来获取proxy代理对象的rawObject的),
+      //如果 key 为 '__v_raw',并且 代理对象的 receiver 在 readonlyMap/reactiveMap 找的到
+      //(说明是来获取proxy代理对象的rawObject的),
       //则返回target(普通对象)
     } else if (
       key === ReactiveFlags.RAW &&
