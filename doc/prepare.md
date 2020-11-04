@@ -1,3 +1,4 @@
+### 源码调试前的准备工作
 #### 1. git clone git@github.com:vuejs/vue-next.git 将 vue-next 源代码克隆至本地
 
 #### 2.项目根目录 yarn install 安装依赖包
