@@ -19,11 +19,6 @@ describe('reactivity/ref', () => {
     expect(a.value).toBe(2)
   })
 
-  it('xx', () => {
-    const a = reactive(new Map([['foo', ref(0)]]))
-    console.log(a.get('foo'))
-  })
-
   it('should be reactive', () => {
     const a = ref(1)
     let dummy

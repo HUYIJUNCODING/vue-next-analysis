@@ -43,7 +43,6 @@ class ComputedRefImpl<T> {
         }
       }
     })
-
     this[ReactiveFlags.IS_READONLY] = isReadonly
   }
 
