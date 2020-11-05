@@ -6,9 +6,9 @@ import { CollectionTypes } from './collectionHandlers'
 
 declare const RefSymbol: unique symbol
 
-//定义Ref类型形状(Ref类型接口)
+//定义Ref类型接口
 export interface Ref<T = any> {
-  value: T //响应式包装对象的value属性，是解包装的值
+  value: T //响应式包装对象的value属性,类型为 any,因此 传入 ref 方法的参数 既可以是原始值类型也可以是对象类型
   /**
    * Type differentiator only.
    * We need this to be in public d.ts but don't want it to show up in IDE
@@ -57,35 +57,36 @@ export function shallowRef(value?: unknown) {
   return createRef(value, true)
 }
 
-//创建Ref实例对象的工厂类
+//创建Ref包装对象的工厂类
 class RefImpl<T> {
-  //私有属性,.value 的返回值
+  //私有属性,保存传入的原始值,也是.value 的返回值
   private _value: T
-  //只读属性,标识是否已经是Ref类型
+  //只读属性,标记当前对象是 Ref 类型
   public readonly __v_isRef = true
-  //构造函数,初始化Ref实例时执行,_rawValue保存原始值,_shallow标识是否深度追踪_rawValue
+  //构造函数,初始化ref实例时执行,_rawValue接收传入的原始值,_shallow只读属性,标记是否去深层追踪传入的原始值
   constructor(private _rawValue: T, public readonly _shallow = false) {
-    //如果_shallow为false则不去深层追踪,如果是true则调用convert方法去对obj类型深层次追踪转换(rawValue - >proxy)
+    //如果_shallow为false则不去深层追踪,如果是true则调用convert方法去对原始值进行深层次追踪转换
     this._value = _shallow ? _rawValue : convert(_rawValue)
   }
   //get value
   get value() {
-    //track调用,用来触发依赖收集(收集.value 变更时的effect依赖)
+    //用来执行依赖收集(收集.value 变更时的effect依赖)
     track(toRaw(this), TrackOpTypes.GET, 'value')
     return this._value
   }
 
   //set value
   set value(newVal) {
+    //只有传入值发生变化,才可以触发依赖更新
     if (hasChanged(toRaw(newVal), this._rawValue)) {
       this._rawValue = newVal
       this._value = this._shallow ? newVal : convert(newVal)
-      //trigger通知deps 触发依赖去更新(遍历执行所有对.value操作依赖的effect)
+      //trigger通知deps 触发所有对该值有依赖的effct函数去执行调用更新
       trigger(toRaw(this), TriggerOpTypes.SET, 'value', newVal)
     }
   }
 }
-//创建Ref实例对象
+//createRef方法
 function createRef(rawValue: unknown, shallow = false) {
   //如果已经是Ref类型,就直接返回,不再去重新创建Ref实例
   if (isRef(rawValue)) {
@@ -102,7 +103,6 @@ export function triggerRef(ref: Ref) {
 export function unref<T>(ref: T): T extends Ref<infer V> ? V : T {
   return isRef(ref) ? (ref.value as any) : ref
 }
-
 
 const shallowUnwrapHandlers: ProxyHandler<any> = {
   get: (target, key, receiver) => unref(Reflect.get(target, key, receiver)),
