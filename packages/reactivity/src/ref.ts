@@ -28,6 +28,7 @@ export type ToRefs<T = any> = { [K in keyof T]: Ref<T[K]> }
 const convert = <T extends unknown>(val: T): T =>
   isObject(val) ? reactive(val) : val
 
+//判断是否是一个 Ref 类型
 export function isRef<T>(r: Ref<T> | unknown): r is Ref<T>
 //判断是否是Ref类型,通过__v_isRef属性(创建Ref包装对象的时候会添加__v_isRef:true标识)
 export function isRef(r: any): r is Ref {
@@ -134,7 +135,7 @@ export type CustomRefFactory<T> = (
   set: (value: T) => void
 }
 
-//创建自定义Ref实例对象的工厂类
+//创建自定义Ref包装对象的工厂类
 class CustomRefImpl<T> {
   private readonly _get: ReturnType<CustomRefFactory<T>>['get']
   private readonly _set: ReturnType<CustomRefFactory<T>>['set']
@@ -167,42 +168,42 @@ export function customRef<T>(factory: CustomRefFactory<T>): Ref<T> {
 
 //把一个响应式对象转换成普通对象，该普通对象的每个 property 都是一个 ref ，和响应式对象 property 一一对应。
 export function toRefs<T extends object>(object: T): ToRefs<T> {
-  //__DEV__:全局变量,默认为true,object必须是一个proxy代理(开发模式下,传入目标如果不是对象类型,会报警告!)
+  //__DEV__:全局变量,默认为true,object必须是一个响应式代理对象(开发模式下,传入目标对象如果不是一个响应式代理对象,会报警告!)
   if (__DEV__ && !isProxy(object)) {
     console.warn(`toRefs() expects a reactive object but received a plain one.`)
   }
-  //创建ret(Object/Array)
+  //创建传入对象的普通映射对象(数组)
   const ret: any = isArray(object) ? new Array(object.length) : {}
-  //将proxy代理中的key一一存入ret,并且都是一个Ref类型
+  //遍历传入的响应式式对象，使用 toRef 方法为其每一个元素（属性）生成一个ref包装类型对象，然后存入映射对象(数组)中
   for (const key in object) {
     ret[key] = toRef(object, key)
   }
-  //返回ret(ret是一个属性/元素均为Ref类型的对象/数组)
-  //从一个组合逻辑函数中返回响应式对象时，用 toRefs 是很有效的，
-  //该 API 让消费组件可以 解构 / 扩展（使用 ... 操作符）返回的对象，并不会丢失响应性
+
   return ret
 }
 
+//为 reactive 对象的属性创建一个ref包装类型对象（将对象属性包装成Ref类型，从而使其具有响应性）
 class ObjectRefImpl<T extends object, K extends keyof T> {
-  public readonly __v_isRef = true
+  public readonly __v_isRef = true //Ref类型标识
 
   constructor(private readonly _object: T, private readonly _key: K) {}
 
+  //get value
   get value() {
     return this._object[this._key]
   }
-
+  //set value
   set value(newVal) {
     this._object[this._key] = newVal
   }
 }
 
-//为一个 reactive 对象的属性创建一个 ref。这个 ref 可以被传递并且能够保持响应性。
+//用来为一个 reactive 对象的属性创建一个 ref。这个 ref 可以被传递并且能够保持响应性。
 export function toRef<T extends object, K extends keyof T>(
   object: T,
   key: K
 ): Ref<T[K]> {
-  //如果已经是Ref类型则直接返回,如果不是,则为对象属性创建Ref包装类型,
+  //如果已经是Ref类型则直接返回,如果不是,则为对象属性创建一个Ref包装对象,
   return isRef(object[key])
     ? object[key]
     : (new ObjectRefImpl(object, key) as any)
