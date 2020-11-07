@@ -272,3 +272,5 @@ customRef 这个方法暴露出来可以供我们自定义 ref，因为是自定
 .value 的时候可以触发我们自定义的 set 方法，获取 .value 的时候触发我们自定义的 get 方法，一系列动作透明公开，细节尽收眼底（可以显式地控制依赖追踪和触发响应）。
 
 以上就是笔者对 ref 章节的全部分析内容了，从如何创建一个 ref 对象跟 一些有用的 api 两个方面做了阐述，对于依赖收集和触发更新，我们放到 effect 章节来进行解读。作为一枚前端菜鸟，因为技术水平有限，所以在分析过程中如有不准确/不当之处，还望路过的大佬们留下正见，共同进步！
+
+* [ref源代码传送门](https://github.com/HUYIJUNCODING/vue-next-analysis/blob/master/packages/reactivity/src/ref.ts)
