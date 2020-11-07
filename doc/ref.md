@@ -8,6 +8,8 @@
 
 - 虽然明白了其作用,但并不清楚内部实现过。所以，带着这样的好奇，接下来我们就深入到它的源码层面,来一探究竟其实现原理。
 
+* [ref源代码传送门](https://github.com/HUYIJUNCODING/vue-next-analysis/blob/master/packages/reactivity/src/ref.ts)
+
 ### 源码分析
 
 我们进入源码的 packages/reactivity 目录下，该目录就是 vue3.0 响应式模块的源码存放处, 然后 src 下找到 ref.ts。
@@ -273,4 +275,3 @@ customRef 这个方法暴露出来可以供我们自定义 ref，因为是自定
 
 以上就是笔者对 ref 章节的全部分析内容了，从如何创建一个 ref 对象跟 一些有用的 api 两个方面做了阐述，对于依赖收集和触发更新，我们放到 effect 章节来进行解读。作为一枚前端菜鸟，因为技术水平有限，所以在分析过程中如有不准确/不当之处，还望路过的大佬们留下正见，共同进步！
 
-* [ref源代码传送门](https://github.com/HUYIJUNCODING/vue-next-analysis/blob/master/packages/reactivity/src/ref.ts)
