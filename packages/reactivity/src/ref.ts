@@ -96,7 +96,7 @@ function createRef(rawValue: unknown, shallow = false) {
   //创建Ref实例
   return new RefImpl(rawValue, shallow)
 }
-//触发依赖更新
+//triggerRef
 export function triggerRef(ref: Ref) {
   trigger(toRaw(ref), TriggerOpTypes.SET, 'value', __DEV__ ? ref.value : void 0)
 }
@@ -118,6 +118,7 @@ const shallowUnwrapHandlers: ProxyHandler<any> = {
   }
 }
 
+//将一个属性为Ref类型的普通对象转换成proxy对象，获取属性时候可以解套返回
 export function proxyRefs<T extends object>(
   objectWithRefs: T
 ): ShallowUnwrapRef<T> {
@@ -143,6 +144,7 @@ class CustomRefImpl<T> {
   public readonly __v_isRef = true
 
   constructor(factory: CustomRefFactory<T>) {
+    //工厂函数会返回一个包含 get和set 方法的对象，get,set 方法里面实现自定义逻辑
     const { get, set } = factory(
       () => track(this, TrackOpTypes.GET, 'value'),
       () => trigger(this, TriggerOpTypes.SET, 'value')
@@ -150,18 +152,18 @@ class CustomRefImpl<T> {
     this._get = get
     this._set = set
   }
-
+  //访问 .value 返回 get 方法执行的结果
   get value() {
     return this._get()
   }
-
+  // 修改 .value 去执行 set 方法
   set value(newVal) {
     this._set(newVal)
   }
 }
 //自定义Ref
 //可以显式地控制依赖追踪和触发响应，接受一个工厂函数，
-//两个参数分别是用于追踪的 track 与用于触发响应的 trigger，并返回一个带有 get 和 set 属性的对象。
+//两个参数分别是收集依赖的 track 与用于触发依赖更新的 trigger，并返回一个带有 get 和 set 属性的对象。
 export function customRef<T>(factory: CustomRefFactory<T>): Ref<T> {
   return new CustomRefImpl(factory) as any
 }

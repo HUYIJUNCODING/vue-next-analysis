@@ -181,14 +181,94 @@ export function toRefs<T extends object>(object: T): ToRefs<T> {
 }
 ```
 
-toRefs 方法用来把一个响应式对象转换成普通对象，该普通对象的每个 property 都是一个 ref ，和响应式对象 property 一一对应。从一个组合逻辑函数中返回响应式对象时，用 toRefs 是很有效的，该 API 让消费组件可以 解构 / 扩展（使用 ... 操作符）返回的对象，并不会丢失响应性，因为解构出来的每一个属性/元素都是一个 ref 对象。
+toRefs 方法用来把一个响应式对象转换成普通对象，该普通对象的每个 property 都是一个 ref ，和响应式对象 property 一一对应。从一个组合逻辑函数中返回响应式对象时，用 toRefs 是很有效的，该 API 让消费组件可以 解构 / 扩展（使用 ... 操作符）返回的对象，并不会丢失响应性，因为解构出来的每一个属性/元素都是一个 ref 对象。例如官方栗子：
+
+```js
+function useFeatureX() {
+  const state = reactive({
+    foo: 1,
+    bar: 2
+  })
+
+  // 对 state 的逻辑操作
+
+  // 返回时将属性都转为 ref(如若不进行属性 ref 转换，比如下方 setup() 中解构使用，则会丢失其响应式，因为此时的响应式是代理对象的，单独的属性使用并不具有)
+  return toRefs(state)
+}
+
+export default {
+  setup() {
+    // 可以解构，不会丢失响应性
+    const { foo, bar } = useFeatureX()
+
+    return {
+      foo,
+      bar
+    }
+  }
+}
+```
 
 #### shallowRef
 
 ```js
 //创建一个浅模式下的 ref 对象 ，只会监听 .value 更改操作，但并不会对 .value 指向的对象类型原始值进行深层监听（即不会使用reactive方法处理使其成为响应式）
 export function shallowRef(value?: unknown) {
- //调用 createRef 方法去创建浅模式 ref 对象，第二个参数会传给 _shallow
+  //调用 createRef 方法去创建浅模式 ref 对象，第二个参数会传给 _shallow,来标识浅模式创建
   return createRef(value, true)
 }
 ```
+
+shallowRef 方法用来创建一个浅模式的 Ref 类型包装对象，与创建的默认的 Ref 包装对象唯一区别就是会显式指定 \_shallow 的值 true，然后不会调用 `convert` 方法去深层追踪 .value 对应的原始值，过程前面已经讲过，这里就不再赘述。
+
+#### customRef
+
+```js
+//自定义 ref 工厂函数类型形状
+export type CustomRefFactory<T> = (
+  track: () => void,
+  trigger: () => void
+) => {
+  get: () => T
+  set: (value: T) => void
+}
+
+//自定义Ref
+//可以显式地控制依赖追踪和触发响应，接受一个工厂函数，
+//两个参数分别是收集依赖的 track 与用于触发依赖更新的 trigger，并返回一个带有 get 和 set 属性的对象。
+export function customRef<T>(factory: CustomRefFactory<T>): Ref<T> {
+  return new CustomRefImpl(factory) as any
+}
+
+//创建自定义Ref包装对象的工厂类
+class CustomRefImpl<T> {
+  private readonly _get: ReturnType<CustomRefFactory<T>>['get']
+  private readonly _set: ReturnType<CustomRefFactory<T>>['set']
+
+  public readonly __v_isRef = true
+
+  constructor(factory: CustomRefFactory<T>) {
+    //工厂函数会返回一个包含 get和set 方法的对象，get,set 方法里面实现自定义逻辑
+    const { get, set } = factory(
+      () => track(this, TrackOpTypes.GET, 'value'),
+      () => trigger(this, TriggerOpTypes.SET, 'value')
+    )
+    this._get = get
+    this._set = set
+  }
+
+  //访问 .value 返回 get 方法执行的结果
+  get value() {
+    return this._get()
+  }
+ // 修改 .value 去执行 set 方法
+  set value(newVal) {
+    this._set(newVal)
+  }
+}
+```
+
+customRef 这个方法暴露出来可以供我们自定义 ref，因为是自定义，因此我们可以将一个工厂函数作为入参回调来执行自定义的逻辑，这样当我们修改
+.value 的时候可以触发我们自定义的 set 方法，获取 .value 的时候触发我们自定义的 get 方法，一系列动作透明公开，细节尽收眼底（可以显式地控制依赖追踪和触发响应）。
+
+以上就是笔者对 ref 章节的全部分析内容了，从如何创建一个 ref 对象跟 一些有用的 api 两个方面做了阐述，对于依赖收集和触发更新，我们放到 effect 章节来进行解读。作为一枚前端菜鸟，因为技术水平有限，所以在分析过程中如有不准确/不当之处，还望路过的大佬们留下正见，共同进步！
