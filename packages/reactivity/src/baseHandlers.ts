@@ -88,7 +88,7 @@ function createGetter(isReadonly = false, shallow = false) {
       return target
     }
 
-    //如果目标对象是数组,key数组的内置方法名('includes', 'indexOf', 'lastIndexOf','push', 'pop', 'shift', 'unshift', 'splice')
+    //如果目标对象是数组,key是数组的内置方法名('includes', 'indexOf', 'lastIndexOf','push', 'pop', 'shift', 'unshift', 'splice')
     //返回其对应方法
     const targetIsArray = isArray(target)
     if (targetIsArray && hasOwn(arrayInstrumentations, key)) {
@@ -113,7 +113,7 @@ function createGetter(isReadonly = false, shallow = false) {
       return res
     }
 
-    // 如果是ref对象，且目标对象不是数组则自动解套ref.value
+    //如果是ref对象，且目标对象不是数组则自动解套ref.value
     //以下为官方文档原话(集合的get方法是另外的,因此这里没有针对Map情况的逻辑):
     //1.ref作为响应式对象的属性访问,直接会解套value
     //2.嵌套在 reactive Object 中时，ref 才会解套。从 Array 或者 Map 等原生集合类中访问 ref 时，不会自动解套
@@ -128,7 +128,8 @@ function createGetter(isReadonly = false, shallow = false) {
       // Convert returned value into a proxy as well. we do the isObject check
       // here to avoid invalid value warning. Also need to lazy access readonly
       // and reactive here to avoid circular dependency.
-      ///将返回值也转换为代理。进行isObject检查是为了是为了避免无效值警告。调用 readonly()/reactive()将返回值转换为代理以避免循环引用情况发生
+      //将返回值也转换为代理。进行isObject检查是为了是为了避免无效值警告。在这里也需要采用惰性访问 readonly 和reactive 方法来将返回值进一步进行proxy 转换
+      //以避免循环依赖的发生
       return isReadonly ? readonly(res) : reactive(res)
     }
     //返回value
@@ -166,12 +167,12 @@ function createSetter(shallow = false) {
       isArray(target) && isIntegerKey(key)
         ? Number(key) < target.length
         : hasOwn(target, key)
-      //拿到原始的set行为
+    //拿到原始的set行为
     const result = Reflect.set(target, key, value, receiver)
     // don't trigger if target is something up in the prototype chain of original
     //如果操作的是原型链上的数据,则不做任何触发监听函数的行为
     if (target === toRaw(receiver)) {
-       //key入股不存在，则表示是添加属性
+      //key入股不存在，则表示是添加属性
       // 否则是给原始属性赋值
       // trigger 用于通知deps，通知依赖这一状态的对象更新(触发依赖更新)
       if (!hadKey) {

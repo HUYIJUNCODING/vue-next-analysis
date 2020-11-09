@@ -14,14 +14,14 @@ createApp({
   setup () {
     const count = ref(0);
     const dump = ref(0)
-    watchEffect(()=> {
-      dump.value = count.value
-    },{lazy: true})
-    setTimeout(()=> {
-        count.value = 1;
-    },1000)
+    // watchEffect(()=> {
+    //   dump.value = count.value
+    // },{lazy: true})
+    // setTimeout(()=> {
+    //     count.value = 1;
+    // },1000)
 
-    onMounted(() => {})
+    // onMounted(() => {})
 
     return {
         count,
