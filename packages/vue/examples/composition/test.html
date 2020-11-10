@@ -2,7 +2,6 @@
 
 <div id="app">
     <div>{{count}}</div>
-    <div>{{dump}}</div>
 </div>
 
 <script>
@@ -13,19 +12,11 @@ const { ref,createApp, reactive, computed, watchEffect, onMounted, onUnmounted }
 createApp({
   setup () {
     const count = ref(0);
-    const dump = ref(0)
-    // watchEffect(()=> {
-    //   dump.value = count.value
-    // },{lazy: true})
-    // setTimeout(()=> {
-    //     count.value = 1;
-    // },1000)
-
+    const r = reactive([count,1,2,3])
+    r.push(5)
     // onMounted(() => {})
-
     return {
-        count,
-        dump
+        count
     }
   }
 

@@ -70,9 +70,13 @@ function getTargetType(value: Target) {
 }
 
 // only unwrap nested ref
+//声明一个专门解嵌套ref 的类型，内部会采用递归 + 数据类型的判断进行 ref解套，直到无法解套为止然后返回
 type UnwrapNestedRefs<T> = T extends Ref ? T : UnwrapRef<T>
 
-//reactive 函数类型声明，接受一个对象，返回一个不会深度嵌套的Ref类型数据
+//reactive 函数类型声明，接收一个对象，返回一个 UnwrapNestedRefs 类型数据(UnwrapNestedRefs 表示一个解嵌套的ref类型数据,
+//如果看过官方文档，会有这样一句话： 当嵌套在 reactive Object 中时，ref 才会解套,所以这里的类型声明，如果传入是一个object类型，
+//返回的响应式对象会是一个解嵌套的ref，我的理解是他并不是说返回的对象是个ref类型，而是指这个对象里面的属性如果是ref，则会解套即属性值
+//直接为 ref.value的值，在 baseHandeler 的 getter 方法中会看到解套逻辑 )
 export function reactive<T extends object>(target: T): UnwrapNestedRefs<T>
 
 //reactive 函数实现

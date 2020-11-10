@@ -143,3 +143,8 @@ export function shallowReadonly<T extends object>(
 会发现与 `reactive` 创建响应式对象有两点不同： 1:指定模式不同，2: handler 不同，其余过程基本一样，这些差异化会在接下来的 `baseHandlers` 和`collectionHandlers`中体现出来，会发现 reactive 文件中代码量比较少，逻辑也比较易懂。其实这部分的关键逻辑基本都在 handler 中，分析 handler才是重头戏，走着。
 
 #### baseHandlers
+
+首先先从 `mutableHandlers` 开始，其余模式的 handler 都是它的变种版
+
+```js
+```
