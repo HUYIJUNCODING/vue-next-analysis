@@ -160,7 +160,7 @@ export const mutableHandlers: ProxyHandler<object> = {
 
 可以看到，`mutableHandlers` 有四个 trap 方法，我们就按照顺序一个个过吧，首先是 `get`。
 
-- get
+##### get
 
 ```js
 const get = /*#__PURE__*/ createGetter() //isReadonly = false, shallow = false
@@ -402,9 +402,9 @@ p.indexOf(3)
 
 总结一下：
 
-- 1.`includes`, `indexOf`, `lastIndexOf` 只是查询，不涉及到修改，因此只会触发 get 劫持，
-- 2.`push`,`pop` 这两个方法先会触发两次 get(获取方法一次，获取 length 一次),pop 弹出，下来会执行一次获取最后一个元素，然后执行弹出，此时 length 改变，所以需要最后触发一次 set 劫持。push 因为是推入元素，先给索引下标赋一次值触发一次 set 劫持，接着 length 改变，会再触发一次 set 劫持。
-- 3.`shift`，`unshift`,`splice` 同样 也会先触发两次 get(获取方法一次，获取 length 一次)，然后都可以修改数组，因此会触发 set ，不过这几个方法有点意思，一般执行的过程中会先 get ，然后 set，我想 get 应该是为了定位目标去查找触发的，set 是设置值时候触发的,过程中会触发多次 set，因此这个在源码中会多次触发 `trigger`,其实想一想也合理，`shift`，`unshift`,`splice` 这样的方法会影响数组原来索引对应的 value 值，那原来索引对应的值变了，
+- `includes`, `indexOf`, `lastIndexOf` 只是查询，不涉及到修改，因此只会触发 get 劫持，
+- `push`,`pop` 这两个方法先会触发两次 get(获取方法一次，获取 length 一次),pop 弹出，下来会执行一次获取最后一个元素，然后执行弹出，此时 length 改变，所以需要最后触发一次 set 劫持。push 因为是推入元素，先给索引下标赋一次值触发一次 set 劫持，接着 length 改变，会再触发一次 set 劫持。
+- `shift`，`unshift`,`splice` 同样 也会先触发两次 get(获取方法一次，获取 length 一次)，然后都可以修改数组，因此会触发 set ，不过这几个方法有点意思，一般执行的过程中会先 get ，然后 set，我想 get 应该是为了定位目标去查找触发的，set 是设置值时候触发的,过程中会触发多次 set，因此这个在源码中会多次触发 `trigger`,其实想一想也合理，`shift`，`unshift`,`splice` 这样的方法会影响数组原来索引对应的 value 值，那原来索引对应的值变了，
      依赖也应该去被更新以保持永远同步最新值，但是就是觉得 set 太过于频繁，是否会有性能上的开销。这里还有一个点，就是这些修改方法，最后都会触发 length 改变引起的 set 劫持，但是实际上发现，对于 `push` 方法 执行 length 触发的 set 逻辑时，获取的旧 length 已经是新的值了，由于 `value === oldValue`，这次并不会触发 `trigger`。而对于 其余几个修改方法，最后的 length 触发的 set 时候 `value ！== oldValue` 会触发一次 `trigger`。
 
 这些操作方法的差异化应该是数组本身底层的规范所导致的，感觉比较复杂，不知道其底层的原因也不影响源码的分析，所以就不去深究了，太复杂了。回到开始的疑问，原来这些修改数组的方法背后是通过 触发 get 和 set 方法从而进行依赖收集和更新的，难怪不需要显示的定义对应的 trap 劫持方法。而且这是 Proxy 本身的特，并不是框架层所做的，顿时觉得，Proxy 真的是太强大了，哈哈哈!
@@ -458,7 +458,7 @@ p.indexOf(3)
 
 至此，关于 get 就分析完了，下来分析 set
 
-- set
+##### set
 
 ```js
 //定义不同模式下的 setter
@@ -521,8 +521,8 @@ function createSetter(shallow = false) {
 
 同样 set 是由 `createSetter` 方法返回，原因同上。首先获取到旧属性值，然后判断是否是浅层模式，非浅层模式下，目标对象不是数组类型，旧属性值为 Ref 类型，新属性值不是 Ref 类型，则将新属性值赋值给旧属性值的 .value，然后直接 `return true`。这里可以说明两个问题：
 
-- 1.嵌套在原始数组中的 ref 是无法解套的（!isArray(target) && isRef(oldValue) && !isRef(value)）
-- 2.直接 return true，表示修改成功，而不让继续往下执行，去触发依赖更新，原因是这个过程会在 ref 中的 set 里面触发，因此这里就不用了
+- 嵌套在原始数组中的 ref 是无法解套的（!isArray(target) && isRef(oldValue) && !isRef(value)）
+- 直接 return true，表示修改成功，而不让继续往下执行，去触发依赖更新，原因是这个过程会在 ref 中的 set 里面触发，因此这里就不用了
 
 
 然后对传入的 key 存在性判断，下来通过反射将本次设置/修改行为，反射到原始对象上。最后通过判断 target === toRaw(receiver) 是否成立来决定是否触发依赖更新。这时也会有个疑问，为啥要加这个判断呢？目标对象还有跟用 toRaw 方法转换后的代理对象不相等的时候？您别说，还真有，请看下方的截图
