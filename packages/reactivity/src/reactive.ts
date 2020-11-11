@@ -27,7 +27,7 @@ export const enum ReactiveFlags {
   SKIP = '__v_skip', //布尔类型，跳过 Proxy 的转换，被该属性标记的对象，不能被响应式化
   IS_REACTIVE = '__v_isReactive', //布尔类型，是否是一个响应式代理对象
   IS_READONLY = '__v_isReadonly', //布尔类型，是否是一个只读对象
-  RAW = '__v_raw' //值类型，存储响应式对象的原始对象
+  RAW = '__v_raw' //存储响应式对象的原始对象
 }
 //定义目标对象类型接口
 export interface Target {

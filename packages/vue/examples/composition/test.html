@@ -12,8 +12,8 @@ const { ref,createApp, reactive, computed, watchEffect, onMounted, onUnmounted }
 createApp({
   setup () {
     const count = ref(0);
-    const r = reactive([count,1,2,3])
-    r.push(5)
+    const r = reactive([0,1,2,3])
+    r.pop()
     // onMounted(() => {})
     return {
         count

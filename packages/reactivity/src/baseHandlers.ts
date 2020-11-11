@@ -44,12 +44,15 @@ const shallowGet = /*#__PURE__*/ createGetter(false, true) //isReadonly = false,
 const readonlyGet = /*#__PURE__*/ createGetter(true) //isReadonly = true, shallow = false
 const shallowReadonlyGet = /*#__PURE__*/ createGetter(true, true) //isReadonly = true, shallow = true
 
+//定义数组内置方法复写容器
 const arrayInstrumentations: Record<string, Function> = {}
 // instrument identity-sensitive Array methods to account for possible reactive
 // values
+//复写数组的查询内置方法，会放入 arrayInstrumentations 复写容器中
 ;(['includes', 'indexOf', 'lastIndexOf'] as const).forEach(key => {
   const method = Array.prototype[key] as any
   arrayInstrumentations[key] = function(this: unknown[], ...args: unknown[]) {
+    //这里的this是原始数组的proxy代理
     const arr = toRaw(this)
     for (let i = 0, l = this.length; i < l; i++) {
       track(arr, TrackOpTypes.GET, i + '')
@@ -66,11 +69,12 @@ const arrayInstrumentations: Record<string, Function> = {}
 })
 // instrument length-altering mutation methods to avoid length being tracked
 // which leads to infinite loops in some cases (#2137)
+//复写数组的内置操作方法，会放入 arrayInstrumentations 复写容器中
 ;(['push', 'pop', 'shift', 'unshift', 'splice'] as const).forEach(key => {
   const method = Array.prototype[key] as any
   arrayInstrumentations[key] = function(this: unknown[], ...args: unknown[]) {
     pauseTracking()
-    const res = method.apply(this, args)
+    const res = method.apply(this, args)//这里的this是 原始数组的proxy代理
     resetTracking()
     return res
   }
@@ -101,7 +105,7 @@ function createGetter(isReadonly = false, shallow = false) {
     //并且当前key 在arrayInstrumentations 中找得到，那么返回arrayInstrumentations中key对应的方法
     const targetIsArray = isArray(target)
     if (targetIsArray && hasOwn(arrayInstrumentations, key)) {
-      //arrayInstrumentations 是一个对象，这个对象里面重写了与以上几个数组内置方法同名的方法
+      //arrayInstrumentations 是一个对象，这个对象里面重写了与以上几个数组内置方法同名的方法，这样当访问这些内置方法时就会被重写的方法拦截。
       return Reflect.get(arrayInstrumentations, key, receiver)
     }
     //采用反射的方式 获取原始对象身上某个属性值，类似于 target[name]。
