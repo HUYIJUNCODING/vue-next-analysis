@@ -164,6 +164,9 @@ export const mutableHandlers: ProxyHandler<object> = {
 
 ```js
 const get = /*#__PURE__*/ createGetter() //isReadonly = false, shallow = false
+const shallowGet = /*#__PURE__*/ createGetter(false, true) //isReadonly = false, shallow = true
+const readonlyGet = /*#__PURE__*/ createGetter(true) //isReadonly = true, shallow = false
+const shallowReadonlyGet = /*#__PURE__*/ createGetter(true, true) //isReadonly = true, shallow = true
 
 //handler中的 get trap(陷阱)，通过createGetter函数返回
 function createGetter(isReadonly = false, shallow = false) {
@@ -407,7 +410,7 @@ p.indexOf(3)
 这些操作方法的差异化应该是数组本身底层的规范所导致的，感觉比较复杂，不知道其底层的原因也不影响源码的分析，所以就不去深究了，太复杂了。回到开始的疑问，原来这些修改数组的方法背后是通过 触发 get 和 set 方法从而进行依赖收集和更新的，难怪不需要显示的定义对应的 trap 劫持方法。而且这是 Proxy 本身的特，并不是框架层所做的，顿时觉得，Proxy 真的是太强大了，哈哈哈!
 
 下来 是利用反射获取到原始对象上的属性值,然后进行不同模式判断，决定是否调用 `track` 去依赖收集，以及对属性值进行类型判断，如果是 Ref 类型则
-解套赋值，如果是对象类型，则去进行响应式转换，这里对对象类型的属性值响应式转换也被称为 `惰性转换`，为啥会这样设计呢，按照源码注释的意思是，是为了避免循环依赖的发生，同时个人认为还有一点就是提高性能，只有在用到的时候才去做响应式转换，没有用到就不转了。最后将获取到的value返回。
+解套赋值，如果是对象类型，则去进行响应式转换，这里对对象类型的属性值响应式转换也被称为 `惰性转换`，为啥会这样设计呢，按照源码注释的意思是，是为了避免循环依赖的发生，同时个人认为还有一点就是提高性能，只有在用到的时候才去做响应式转换，没有用到就不转了。最后将获取到的 value 返回。
 
 ```js
     //反射的方式获取原始对象身上某个属性值，类似于 target[name]。
@@ -452,6 +455,74 @@ p.indexOf(3)
     }
     return res
 ```
-至此，关于 get 就分析完了，下来我们对 set 进行分析
 
-* 
+至此，关于 get 就分析完了，下来分析 set
+
+- set
+
+```js
+//定义不同模式下的 setter
+const set = /*#__PURE__*/ createSetter()
+const shallowSet = /*#__PURE__*/ createSetter(true)
+
+//handler中的 set trap(陷阱)，通过createSetter函数返回
+function createSetter(shallow = false) {
+  return function set(
+    target: object, //原始对象
+    key: string | symbol, //key
+    value: unknown, //新属性值
+    receiver: object //最初被调用的对象,通常是 proxy 本身(为啥是通常而不是一定呢，可以看这里 https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Proxy/handler/set#%E5%8F%82%E6%95%B0)
+  ): boolean {
+    //旧属性值
+    const oldValue = (target as any)[key]
+    //对于ref类型属性赋值只有非浅层模式下才去关心，否则不用去管
+    if (!shallow) {
+      //如果value是响应式数据，则返回其映射的原始数据
+      value = toRaw(value)
+      //如果原始对象不是数组,旧属性值是ref对象，新属性值不是ref对象，则将新值赋给旧属性的value，
+      //这里也再次间接的说明嵌套在原始数组中的ref是无法解套的
+      if (!isArray(target) && isRef(oldValue) && !isRef(value)) {
+        oldValue.value = value
+        //这里会直接return true，表示修改成功，而不让继续往下执行，去触发依赖更新，原因是这个过程会在ref中的set里面触发，因此这里就不用了
+        return true
+      }
+    } else {
+      // in shallow mode, objects are set as-is regardless of reactive or not
+      //在浅层模式下，对象都按原样设置属性,不去管是否是响应式，
+    }
+
+    //判断key值是否存在(原始对象或者原始数组中)
+    const hadKey =
+      isArray(target) && isIntegerKey(key)
+        ? Number(key) < target.length
+        : hasOwn(target, key)
+    // 将本次设置/修改行为，反射到原始对象上(返回值为布尔类型，true表示设置成功)
+    const result = Reflect.set(target, key, value, receiver)
+    // don't trigger if target is something up in the prototype chain of original
+    //如果操作的是原型链上的数据,则不做任何触发监听函数的行为。
+    //receiver: 最初被调用的对象。通常是 proxy 本身，但 handler 的 set 方法也有可能在原型链上，或以其他方式被间接地调用（因此不一定是 proxy 本身）所以，这里需要通过 target === toRaw(receiver) 就可以判断是否操作的是原型链上的数据。https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Proxy/handler/set#%E5%8F%82%E6%95%B0
+    //如果此时的赋值操作操作的是原型对象的属性，那就不用去触发依赖更新，首先因为目标对象上没有这个属性，才去的原型链上找，其次 receiver是目标对象，而不是原型对象
+    //所以，设置行为还是发生在子对象（目标对象）身上的，原型对象其实没有变化，也就没有必须要触发依赖更新，如果不判断会发现set被触发两次，进而原型上的也会
+    //进行一次依赖更新操作，目标对象也会进行一次。
+    if (target === toRaw(receiver)) {
+      //key如果不存在，则表示是添加属性
+      // 否则是给旧属性设置新值
+      // trigger 用于通知deps，通知依赖更新(触发依赖更新)
+      if (!hadKey) {
+        trigger(target, TriggerOpTypes.ADD, key, value)
+      } else if (hasChanged(value, oldValue)) {
+        trigger(target, TriggerOpTypes.SET, key, value, oldValue)
+      }
+    }
+    return result
+  }
+}
+```
+
+同样 set 是由 `createSetter` 方法返回，原因同上。首先获取到旧属性值，然后判断是否是浅层模式，非浅层模式下，目标对象不是数组类型，旧属性值为 Ref 类型，新属性值不是 Ref 类型，则将新属性值赋值给旧属性值的 .value，然后直接 `return true`。这里可以说明两个问题：
+
+- 1. 嵌套在原始数组中的 ref 是无法解套的（!isArray(target) && isRef(oldValue) && !isRef(value)）
+- 2. 直接 return true，表示修改成功，而不让继续往下执行，去触发依赖更新，原因是这个过程会在 ref 中的 set 里面触发，因此这里就不用了
+
+
+然后对传入的 key 存在性判断，下来通过反射将本次设置/修改行为，反射到原始对象上。最后通过判断 target === toRaw(receiver) 是否成立来决定是否触发依赖更新。这里
