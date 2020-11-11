@@ -527,3 +527,4 @@ function createSetter(shallow = false) {
 
 然后对传入的 key 存在性判断，下来通过反射将本次设置/修改行为，反射到原始对象上。最后通过判断 target === toRaw(receiver) 是否成立来决定是否触发依赖更新。这时也会有个疑问，为啥要加这个判断呢？目标对象还有跟用 toRaw 方法转换后的代理对象不相等的时候？您别说，还真有，请看下方的截图
 
+![](https://github.com/HUYIJUNCODING/vue-next-analysis/blob/master/doc/assets/proxy_set_handler.png)
