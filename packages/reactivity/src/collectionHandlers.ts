@@ -1,6 +1,7 @@
-import { toRaw, reactive, readonly, ReactiveFlags } from './reactive'
-import { track, trigger, ITERATE_KEY, MAP_KEY_ITERATE_KEY } from './effect'
-import { TrackOpTypes, TriggerOpTypes } from './operations'
+import { toRaw, reactive, readonly, ReactiveFlags } from './reactive' //引入 reactive 文件中的一些方法和类型变量
+import { track, trigger, ITERATE_KEY, MAP_KEY_ITERATE_KEY } from './effect' //引入effect 文件中的一些方法和变量标识
+import { TrackOpTypes, TriggerOpTypes } from './operations' //操作数据的行为枚举常量
+//一些工具函数
 import {
   isObject,
   capitalize,
@@ -10,6 +11,7 @@ import {
   isMap
 } from '@vue/shared'
 
+//类型定义
 export type CollectionTypes = IterableCollections | WeakCollections
 
 type IterableCollections = Map<any, any> | Set<any>
@@ -28,24 +30,34 @@ const toShallow = <T extends unknown>(value: T): T => value
 const getProto = <T extends CollectionTypes>(v: T): any =>
   Reflect.getPrototypeOf(v)
 
-//proxy代理的get方法
+//插装方法 get,访问集合 internal slots(内置插槽) 中存放的属性
+//Map,WeakMap
 function get(
-  target: MapTypes,
+  target: MapTypes,//这里需要注意 target 目标对象不是 原始集合对象，而是 它的代理对象
   key: unknown,
   isReadonly = false,
   isShallow = false
 ) {
   // #1772: readonly(reactive(Map)) should return readonly + reactive version
   // of the value
+  //获取代理对象的原始集合对象（这里有可能还是个 reactive 响应式，原因看上面英文备注：readonly(reactive(Map))）
   target = (target as any)[ReactiveFlags.RAW]
+  //再转一次，如果 target 不是响应式就原路返回，如果是则拿到他的原始集合对象，这一步会始终可以保证拿到原始集合
   const rawTarget = toRaw(target)
+  //集合类型 key 可以是对象类型，因此有可能是响应式的，所以要转一下，保证拿到的是原始类型
   const rawKey = toRaw(key)
+  //如果 key 不相等，说明，此时key是响应式的
   if (key !== rawKey) {
+    //非只读模式下，进行依赖收集，注意这个时候是收集 key 为响应式对象的依赖
     !isReadonly && track(rawTarget, TrackOpTypes.GET, key)
   }
+  //这一步依赖是必须收集的，无论key是否是响应式的，永远收集的是 原始值key对应的依赖
   !isReadonly && track(rawTarget, TrackOpTypes.GET, rawKey)
+  //从原型上获取 has方法
   const { has } = getProto(rawTarget)
+  //获取不同模式下转换方法。toReadonly(深度追踪对象类型属性，深度只读转换),toReactive(深度追踪对象类型属性，深度响应式转换)，toShallow(浅层转换，会直接返回属性值，不做深度追踪)
   const wrap = isReadonly ? toReadonly : isShallow ? toShallow : toReactive
+  //执行转换，wrap为根据不同模式，获取到的转换方法
   if (has.call(rawTarget, key)) {
     return wrap(target.get(key))
   } else if (has.call(rawTarget, rawKey)) {
@@ -65,13 +77,15 @@ function has(this: CollectionTypes, key: unknown, isReadonly = false): boolean {
     ? target.has(key)
     : target.has(key) || target.has(rawKey)
 }
-
+//插装方法 size,获取集合长度
+//all Collection
 function size(target: IterableCollections, isReadonly = false) {
   target = (target as any)[ReactiveFlags.RAW]
   !isReadonly && track(toRaw(target), TrackOpTypes.ITERATE, ITERATE_KEY)
   return Reflect.get(target, 'size', target)
 }
-
+//插装方法 add,往集合 internal slots(内置插槽) 中存属性值
+//set ,MapSet
 function add(this: SetTypes, value: unknown) {
   value = toRaw(value)
   const target = toRaw(this)
@@ -233,8 +247,10 @@ function createReadonlyMethod(type: TriggerOpTypes): Function {
   }
 }
 
-//需要监听的集合方法调用
+//可变集合handler中的插装对象（属性为复写集合的内置方法，也称为 “插装方法”）
 const mutableInstrumentations: Record<string, Function> = {
+  //插装方法
+
   get(this: MapTypes, key: unknown) {
     return get(this, key)
   },
@@ -300,28 +316,34 @@ iteratorMethods.forEach(method => {
     true
   )
 })
-//创建getter
+//创建不同模式下的 getter 捕获器方法
 function createInstrumentationGetter(isReadonly: boolean, shallow: boolean) {
+  //一个对象（称为插装对象），内部属性为复写的集合内置方法（会发现跟前面 baseHandlers 中的数组行为类似）
   const instrumentations = shallow
     ? shallowInstrumentations
     : isReadonly
       ? readonlyInstrumentations
       : mutableInstrumentations
-
+  //返回的getter
   return (
     target: CollectionTypes,
     key: string | symbol,
     receiver: CollectionTypes
   ) => {
+    //如果key为 '__v_isReactive'则返回 !isReadonly，判断代理对象是否是可响应的
     if (key === ReactiveFlags.IS_REACTIVE) {
       return !isReadonly
+      //如果key为 '__v_isReadonly',则返回 isReadonly 状态的值,判断代理对象是否是只读的
     } else if (key === ReactiveFlags.IS_READONLY) {
       return isReadonly
+      //如果 key 为 '__v_raw',并且 代理对象的 receiver 在 readonlyMap/reactiveMap 找的到
+      //(说明是来获取proxy代理对象的rawObject的),
+      //则返回代理对象对应的原始 target 集合对象
     } else if (key === ReactiveFlags.RAW) {
       return target
     }
-      // 如果是`get`、`has`、`add`、`set`、`delete`、`clear`、`forEach`的方法调用，或者是获取`size`，
-      //那么改为调用mutableInstrumentations里的相关方法,否则是正常的获取响应式集合的属性
+    // 如果key是`get`、`has`、`add`、`set`、`delete`、`clear`、`forEach`，或者`size`，表示是调用集合的内置方法，则
+    //将target 用 instrumentations 替代，否则表示是获取普通属性行为，目标对象还是target然后将获取结果返回（内置方法或者属性值）
     return Reflect.get(
       hasOwn(instrumentations, key) && key in target
         ? instrumentations
@@ -332,8 +354,17 @@ function createInstrumentationGetter(isReadonly: boolean, shallow: boolean) {
   }
 }
 
+//可变集合的代理handler
+//这里会发现跟之前的 baseHandlers 中定义的handler不一样，集合的 handler 只有一个 getter 捕获器方法，并没有发现 setter 等其他捕获方法，
+//原因是对于集合(Map,Set,WeakMap,WeakSet，其实还有Date，Promise等这里不涉及，所以就不讨论)，它们内部都有一个 “internal slots”（内部插槽）,
+//是用来存储属性数据的，这些属性数据在访问的时候可以被集合的内置方法直接访问（get,set,has等），而不通过[[Get]] / [[Set]]内部方法访问它们。因此代理无法拦截
+//你可以尝试对集合的代理后对象直接使用 .get ,或者 .set 方式去操作，会报错：TypeError: Method Map.prototype.set/get called on incompatible receiver [object Object]
+//那换做代理对象，因为代理对象内部并没有 “internal slots” ，内置方法Map.prototype.set/get方法尝试访问内部属性this.[[MapData]]，但由于this = proxy，无法在代理中找到它,
+//所以就会报错来表示访问属性失败。https://javascript.info/proxy#built-in-objects-internal-slots
+
 export const mutableCollectionHandlers: ProxyHandler<CollectionTypes> = {
-  get: createInstrumentationGetter(false, false)
+  // get trap(捕获器)方法。
+  get: createInstrumentationGetter(false, false) //isReadonly: false, shallow: false
 }
 
 export const shallowCollectionHandlers: ProxyHandler<CollectionTypes> = {

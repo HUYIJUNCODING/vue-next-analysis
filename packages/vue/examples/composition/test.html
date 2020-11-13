@@ -12,8 +12,10 @@ const { ref,createApp, reactive, computed, watchEffect, onMounted, onUnmounted }
 createApp({
   setup () {
     const count = ref(0);
-    const r = reactive([0,1,2,3])
-    r.pop()
+    const map = reactive(new Map([['a',1],['b',2]]))
+
+    map.set('c',3)
+    console.log(map,'map')
     // onMounted(() => {})
     return {
         count

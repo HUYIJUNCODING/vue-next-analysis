@@ -404,10 +404,10 @@ p.indexOf(3)
 
 - `includes`, `indexOf`, `lastIndexOf` 只是查询，不涉及到修改，因此只会触发 get 劫持，
 - `push`,`pop` 这两个方法先会触发两次 get(获取方法一次，获取 length 一次),pop 弹出，下来会执行一次获取最后一个元素，然后执行弹出，此时 length 改变，所以需要最后触发一次 set 劫持。push 因为是推入元素，先给索引下标赋一次值触发一次 set 劫持，接着 length 改变，会再触发一次 set 劫持。
-- `shift`，`unshift`,`splice` 同样 也会先触发两次 get(获取方法一次，获取 length 一次)，然后都可以修改数组，因此会触发 set ，不过这几个方法有点意思，一般执行的过程中会先 get ，然后 set，我想 get 应该是为了定位目标去查找触发的，set 是设置值时候触发的,过程中会触发多次 set，因此这个在源码中会多次触发 `trigger`,其实想一想也合理，`shift`，`unshift`,`splice` 这样的方法会影响数组原来索引对应的 value 值，那原来索引对应的值变了，
-     依赖也应该去被更新以保持永远同步最新值，但是就是觉得 set 太过于频繁，是否会有性能上的开销。这里还有一个点，就是这些修改方法，最后都会触发 length 改变引起的 set 劫持，但是实际上发现，对于 `push` 方法 执行 length 触发的 set 逻辑时，获取的旧 length 已经是新的值了，由于 `value === oldValue`，这次并不会触发 `trigger`。而对于 其余几个修改方法，最后的 length 触发的 set 时候 `value ！== oldValue` 会触发一次 `trigger`。
+- `shift`，`unshift`,`splice` 同样 也会先触发两次 get(获取方法一次，获取 length 一次)，然后都可以修改数组，因此会触发 set ，不过这几个方法有点意思，一般执行的过程中会先 get ，然后 set，我想 get 应该是为了定位目标去查找触发的，set 是设置值时候触发的,过程中会触发多次 set，因此这个在源码中会多次触发 `trigger`,其实想一想也合理，`shift`，`unshift`,`splice` 这样的方法会影响数组原来索引对应的 value 值发生移位或变更，原来索引对应的值变了，
+  依赖也应该去被更新以保持永远同步最新值，但是就是觉得 set 太过于频繁，是否会有性能上的开销。这里还有一个点，就是这些修改方法，最后都会触发 length 改变引起的 set 劫持，但是实际上发现，对于 `push` 方法 执行 length 触发的 set 逻辑时，获取的旧 length 已经是新的值了，由于 `value === oldValue`，这次并不会触发 `trigger`。而对于 其余几个修改方法，最后的 length 触发的 set 时候 `value ！== oldValue` 会触发一次 `trigger`。
 
-这些操作方法的差异化应该是数组本身底层的规范所导致的，感觉比较复杂，不知道其底层的原因也不影响源码的分析，所以就不去深究了，太复杂了。回到开始的疑问，原来这些修改数组的方法背后是通过 触发 get 和 set 方法从而进行依赖收集和更新的，难怪不需要显示的定义对应的 trap 劫持方法。而且这是 Proxy 本身的特，并不是框架层所做的，顿时觉得，Proxy 真的是太强大了，哈哈哈!
+这些操作方法的差异化应该是数组本身底层的规范所导致的，感觉比较复杂，不知道其底层的原因也不影响源码的分析，所以就不去深究了，太复杂了。回到开始的疑问，原来这些操作数组的方法背后是通过 触发 get 和 set 方式从而进行依赖收集和更新的，难怪不需要显示的定义对应的 trap 劫持方法。而且这是 Proxy 本身的特性，并不是框架层所做的，顿时觉得，Proxy 真的是太强大了，哈哈哈!
 
 下来 是利用反射获取到原始对象上的属性值,然后进行不同模式判断，决定是否调用 `track` 去依赖收集，以及对属性值进行类型判断，如果是 Ref 类型则
 解套赋值，如果是对象类型，则去进行响应式转换，这里对对象类型的属性值响应式转换也被称为 `惰性转换`，为啥会这样设计呢，按照源码注释的意思是，是为了避免循环依赖的发生，同时个人认为还有一点就是提高性能，只有在用到的时候才去做响应式转换，没有用到就不转了。最后将获取到的 value 返回。
@@ -524,7 +524,113 @@ function createSetter(shallow = false) {
 - 嵌套在原始数组中的 ref 是无法解套的（!isArray(target) && isRef(oldValue) && !isRef(value)）
 - 直接 return true，表示修改成功，而不让继续往下执行，去触发依赖更新，原因是这个过程会在 ref 中的 set 里面触发，因此这里就不用了
 
-
 然后对传入的 key 存在性判断，下来通过反射将本次设置/修改行为，反射到原始对象上。最后通过判断 target === toRaw(receiver) 是否成立来决定是否触发依赖更新。这时也会有个疑问，为啥要加这个判断呢？目标对象还有跟用 toRaw 方法转换后的代理对象不相等的时候？您别说，还真有，请看下方的截图
+[MDN 文档链接在这里](https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Proxy/handler/set#%E5%8F%82%E6%95%B0)
 
 ![](https://github.com/HUYIJUNCODING/vue-next-analysis/blob/master/doc/assets/proxy_set_handler.png)
+
+如果此时的赋值操作操作的是原型对象的属性，那就不用去触发依赖更新，首先因为目标对象上没有这个属性，才去的原型链上找，其次 receiver 是目标对象，而不是原型对象。所以，设置行为还是发生在子对象（目标对象）身上的，原型对象其实没有变化，也就没有必须要触发依赖更新，如果不判断会发生 set 被触发两次，进而原型上的也会进行一次依赖更新操作，目标对象也会进行一次，所以这里的 target === toRaw(receiver) 判断是必要的。
+
+然后判断内部如果 `hadKey` 为 false 表示是添加的新属性，type 为 add，否则表示修改已有属性，type 为 set 然后 trigger 更新依赖，最后一步将 set 结果返回。
+
+reactive 篇我们也不打算对 `track` 和 `trigger` 这两个方法内部进行深入分析，先知道作用就行，下来在 effect 篇详细的介绍。
+
+到这里 baseHandlers 中两个最重要和最常用的 trap 方法就分析结束了，下来对其他几个剩余 trap 也分析下，比较简单，所以直接就贴出来吧。
+
+```js
+//删除属性的trap方法
+function deleteProperty(target: object, key: string | symbol): boolean {
+  //判断目标对象上是否有这个key
+  const hadKey = hasOwn(target, key)
+  //获取旧的属性值
+  const oldValue = (target as any)[key]
+  //删除属性操作反射到原始对象上，结果为布尔值，表示执行删除结果
+  const result = Reflect.deleteProperty(target, key)
+  //如果删除成功，并且key存在，则去触发依赖更新
+  if (result && hadKey) {
+    trigger(target, TriggerOpTypes.DELETE, key, undefined, oldValue)
+  }
+  //返回执行删除的结果
+  return result
+}
+//拦截 in 操作符，如果使用 in 操作符操作代理对象（例如： 'a' in p），则该 trap 方法会被触发
+function has(target: object, key: string | symbol): boolean {
+  const result = Reflect.has(target, key)
+  if (!isSymbol(key) || !builtInSymbols.has(key)) {
+    track(target, TrackOpTypes.HAS, key)
+  }
+  return result
+}
+//拦截 Object.keys 方法
+function ownKeys(target: object): (string | number | symbol)[] {
+  track(target, TrackOpTypes.ITERATE, isArray(target) ? 'length' : ITERATE_KEY)
+  return Reflect.ownKeys(target)
+}
+```
+
+这是可读写模式下，那还有几个模式下的 handler（`readonlyHandlers`，`shallowReactiveHandlers`，`shallowReadonlyHandlers`）都是基于 `mutableHandlers` 特殊处理，也比较简单，加上注释一眼就可以看明白的，我们也就直接贴出来吧
+
+```js
+//只读模式下代理handler
+export const readonlyHandlers: ProxyHandler<object> = {
+  get: readonlyGet, //readonlyGet 方法会返回getter ，readonlyGet会传递入参true给 getter 的形参isReadonly，标识只读模式，这样，getter 里面会根据此标识惰性访问 readonly将对象类型的属性值
+  //用readonly 方法深度处理
+
+  //只读模式不允许设置/修改原始对象的属性值
+  set(target, key) {
+    if (__DEV__) {
+      console.warn(
+        `Set operation on key "${String(key)}" failed: target is readonly.`,
+        target
+      )
+    }
+    return true
+  },
+  //也不允许删除属性值
+  deleteProperty(target, key) {
+    if (__DEV__) {
+      console.warn(
+        `Delete operation on key "${String(key)}" failed: target is readonly.`,
+        target
+      )
+    }
+    return true
+  }
+}
+
+//浅层模式下的代理handler
+//extend 内部调用 Object.assign ，扩展合并对象属性的，会发现该模式下将 mutableHandlers 中的 get ，set 进行了重写，
+//其余 trap跟mutableHandlers相同，那为啥要重写这两个trap方法呢，因为模式不一样，劫持逻辑肯定就不一样了，shollow模式下，只会对
+//对象根层（第一层）属性进行劫持，因此是可变对象的浅化版（没有解套ref和深层追踪）
+export const shallowReactiveHandlers: ProxyHandler<object> = extend(
+  {},
+  mutableHandlers,
+  {
+    get: shallowGet,
+    set: shallowSet
+  }
+)
+
+// Props handlers are special in the sense that it should not unwrap top-level
+// refs (in order to allow refs to be explicitly passed down), but should
+// retain the reactivity of the normal readonly object.
+// 浅层只读模式下的代理handler
+//只为某个对象的自有（第一层）属性创建浅层的只读响应式代理，同样也不会做深层次、递归地代理，深层次的属性并不是只读的
+export const shallowReadonlyHandlers: ProxyHandler<object> = extend(
+  {},
+  readonlyHandlers,
+  {
+    get: shallowReadonlyGet
+  }
+)
+```
+
+
+好了，以上就是对 `baseHandlers` 中内容的全部分析。还有个表示集合类型代理的 handler  `collectionHandlers`，趁热打铁，下来我们就去分析它吧。
+
+
+##### collectionHandlers
+
+
+
+
