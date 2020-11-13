@@ -7,6 +7,8 @@
 - Proxy 是 reactive 内部的实现基础，她是直接代理整个对象，相较于 vue2.x 中的 Object.defineProperty 劫持对象的指定属性会显得格外省事和强大(毕竟拥有 13 种拦截方法，能力不是吹出来的)
 - reactive 返回的代理对象不等于原始对象。建议仅使用代理对象而避免依赖原始对象(直接对原始对象进行读写操作，不会触发依赖更新和收集)
 
+* [reactive篇源代码传送门](https://github.com/HUYIJUNCODING/vue-next-analysis/blob/master/packages/reactivity/src/reactive.ts)
+
 ### 源码分析
 
 #### reactive
