@@ -625,11 +625,373 @@ export const shallowReadonlyHandlers: ProxyHandler<object> = extend(
 )
 ```
 
+好了，以上就是对 `baseHandlers` 中内容的全部分析。还有个表示集合类型代理的 handler `collectionHandlers`，趁热打铁，下来我们就去分析它吧。
 
-好了，以上就是对 `baseHandlers` 中内容的全部分析。还有个表示集合类型代理的 handler  `collectionHandlers`，趁热打铁，下来我们就去分析它吧。
+#### collectionHandlers
+
+首先从 `mutableCollectionHandlers` 开始，只读模式，浅层模式跟它差不多。
+
+```js
+export const mutableCollectionHandlers: ProxyHandler<CollectionTypes> = {
+  // get trap(捕获器)方法。
+  get: createInstrumentationGetter(false, false) //isReadonly: false, shallow: false
+}
+```
+
+细心的小伙伴肯定会发现集合这里的 handler 跟之前的 baseHandlers 中定义的 handler 不太一样，集合的 handler 只有一个 get 捕获器方法，并没有发现 set,add 等其他捕获方法。这是为什么呢？我们可以尝试写个 demo 看看。
+
+```js
+const map = new Map([['a', 1], ['b', 2], ['c', 3]])
+
+const p = new Proxy(map, {
+  get(target, key, receiver) {
+    return Reflect.get(...arguments)
+  }
+})
+
+p.set('d', 4)
+
+//TypeError: Method Map.prototype.set called on incompatible receiver [object Object]
+```
+
+会发现报错了，咋还报错了呢，写法没毛病啊！其实这里不是你的错，不是我的错，是集合内部设计的问题。这不是你说的，也不是我说的，是人家 [文档](https://javascript.info/proxy#built-in-objects-internal-slots) 说的。截图为证。
+
+![](https://github.com/HUYIJUNCODING/vue-next-analysis/blob/master/doc/assets/proxy_limit.png)
+
+> 大概意思就是集合(`Map`，`Set`，`WeakMap`，`WeakSet`，其实还有 `Date`，`Promise` 等这里不涉及，所以就不讨论)，它们内部都有一个 `internal slots`（内部插槽），是用来存储属性数据的。这些属性数据在访问的时候可以被集合的内置方法直接访问（get,set,has 等），而不通过[[Get]] / [[Set]]内部方法访问它们。因此代理无法拦截。
+
+这里使用代理对象调用集合内置方法的形式去访问，此时代理对象内部并没有 `internal slots` ，但是内置方法 `Map.prototype.set/get`不知道， 会尝试访问内部属性 this.[[MapData]]，此时由于 `this == proxy`，无法在代理中找到它，就报错了，表示访问属性失败。
+
+文档也给出了解决办法。我们就结合我们的例子对照改造下，代码如下：
+
+```js
+const map = new Map([['a', 1], ['b', 2], ['c', 3]])
+
+const p = new Proxy(map, {
+  get(target, key, receiver) {
+    let value = Reflect.get(...arguments)
+    return typeof value == 'function' ? value.bind(target) : value
+  }
+})
+
+p.set('d', 4)
+console.log(p.get('d')) //打印结果： 4
+```
+
+可以看到代码正常运行，且成功打印设置的属性值，稍作分析，我们就可以看出差别，原来啊对我去到的结果做了一次判断，如果返回值的类型为
+函数类型，则手动给绑定 this 执行（target 目标对象）这样，这个方法无论谁调用，内部的 this 永远指向原始的目标集合对象，所以内置方法就可以直接访问
+`internal slots`（内部插槽）。那现在大概就明白了为啥集合代理的 handler 只有 get 捕获器方法了吧。那明白了原因后，我们继续看源码, get trap 方法是调用 `createInstrumentationGetter` 方法来初始化的，那我们就去找到这个方法看看内部实现。
+
+```js
+//创建不同模式下的 getter 捕获器方法
+function createInstrumentationGetter(isReadonly: boolean, shallow: boolean) {
+  //一个对象（称为插装对象），内部属性为复写的集合内置方法（会发现跟前面 baseHandlers 中的数组行为类似）
+  const instrumentations = shallow
+    ? shallowInstrumentations
+    : isReadonly
+      ? readonlyInstrumentations
+      : mutableInstrumentations
+  //返回的getter
+  return (
+    target: CollectionTypes,
+    key: string | symbol,
+    receiver: CollectionTypes
+  ) => {
+    //如果key为 '__v_isReactive'则返回 !isReadonly，判断代理对象是否是可响应的
+    if (key === ReactiveFlags.IS_REACTIVE) {
+      return !isReadonly
+      //如果key为 '__v_isReadonly',则返回 isReadonly 状态的值,判断代理对象是否是只读的
+    } else if (key === ReactiveFlags.IS_READONLY) {
+      return isReadonly
+      //如果 key 为 '__v_raw',并且 代理对象的 receiver 在 readonlyMap/reactiveMap 找的到
+      //(说明是来获取proxy代理对象的rawObject的),
+      //则返回代理对象对应的原始 target 集合对象
+    } else if (key === ReactiveFlags.RAW) {
+      return target
+    }
+    // 如果key是`get`、`has`、`add`、`set`、`delete`、`clear`、`forEach`，或者`size`，表示是调用集合的内置方法，则
+    //将target 用 instrumentations 替代，否则表示是获取普通属性行为，目标对象还是target然后将获取结果返回（内置方法或者属性值）
+    return Reflect.get(
+      hasOwn(instrumentations, key) && key in target
+        ? instrumentations
+        : target,
+      key,
+      receiver
+    )
+  }
+}
+```
+
+会发现 `createInstrumentationGetter` 接收两个参数，分别控制不同模式下的创建，这种方式应该有印象，在 `baseHandlers` 中见过。
+
+然后定义了一个变量来接收不同模式下的 `instrumentations` 对象（称为插装对象），这个插装对象内部属性为复写的集合内置方法（会发现跟前面 baseHandlers 中的数组行为类似），同样我们也拿过来看下（这里我们就只把 `mutableInstrumentations` 拿过来，其他两种模式跟它差不多）
+
+```js
+//可变集合handler中的插装对象（属性为复写集合的内置方法，也称为 “插装方法”）
+const mutableInstrumentations: Record<string, Function> = {
+  //插装方法
+  get(this: MapTypes, key: unknown) {
+    return get(this, key)
+  },
+  get size() {
+    return size((this as unknown) as IterableCollections)
+  },
+  has,
+  add,
+  set,
+  delete: deleteEntry,
+  clear,
+  forEach: createForEach(false, false)
+}
+```
+
+这个插装对象内部定义了一些操作集合的同名方法，这些方法就是捕获器方法，我们分析完 `createInstrumentationGetter` 会一个个进行分析。
+然后 `createInstrumentationGetter` 会返回一个函数，这个函数就是 getter （看参数），当集合调用内置方法或者直接获取自定义属性(自定义属性定义和获取方式同对象)这个函数就会被触发(就是 get 方法)。方法内部先是对 key 是否是 `ReactiveFlags` 里枚举常量标识进行判断,这部分跟 `baseHandler`中逻辑相同，然后返回 `Reflect.get`获取的属性值或者方法。这里稍微说明下：
+
+- 如果 key 是`get`、`has`、`add`、`set`、`delete`、`clear`、`forEach`，或者`size`，表示是调用集合的内置方法，则将 `target` 用 `instrumentations` 替代，否则表示是获取普通属性行为，目标对象还是 `target` 然后将获取结果返回（内置方法或者属性值）
+
+好了，下来对几个插装方法/属性进行分析
+
+##### get
+
+```js
+//插装方法 get,访问集合 internal slots(内置插槽) 中存放的属性
+//Map,WeakMap
+function get(
+  target: MapTypes, //这里需要注意 target 目标对象不是 原始集合对象，而是 它的代理对象
+  key: unknown,
+  isReadonly = false,
+  isShallow = false
+) {
+  // #1772: readonly(reactive(Map)) should return readonly + reactive version
+  // of the value
+  //获取代理对象的原始集合对象（这里有可能还是个 reactive 响应式，原因看上面英文备注：readonly(reactive(Map))）
+  target = (target as any)[ReactiveFlags.RAW]
+  //再转一次，如果 target 不是响应式就原路返回，如果是则拿到他的原始集合对象，这一步会始终可以保证拿到原始集合
+  const rawTarget = toRaw(target)
+  //集合类型 key 可以是对象类型，因此有可能是响应式的，所以要转一下，保证拿到的是原始类型
+  const rawKey = toRaw(key)
+  //如果 key 不相等，说明，此时key是响应式的
+  if (key !== rawKey) {
+    //非只读模式下，进行依赖收集，注意这个时候是收集 key 为响应式对象的依赖
+    !isReadonly && track(rawTarget, TrackOpTypes.GET, key)
+  }
+  //这一步依赖是必须收集的，无论key是否是响应式的，永远收集的是 原始值key对应的依赖
+  !isReadonly && track(rawTarget, TrackOpTypes.GET, rawKey)
+  //从原型上获取 has方法
+  const { has } = getProto(rawTarget)
+  //获取不同模式下转换方法。toReadonly(深度追踪对象类型属性，深度只读转换),toReactive(深度追踪对象类型属性，深度响应式转换)，toShallow(浅层转换，会直接返回属性值，不做深度追踪)
+  const wrap = isReadonly ? toReadonly : isShallow ? toShallow : toReactive
+  //执行转换，wrap为根据不同模式，获取到的转换方法
+  if (has.call(rawTarget, key)) {
+    return wrap(target.get(key))
+  } else if (has.call(rawTarget, rawKey)) {
+    return wrap(target.get(rawKey))
+  }
+}
+```
+
+首先需要注意参数 `target` ，这里的 target 对象不是原始的集合对象，而是 Proxy 代理对象，为啥是这样呢，下来我们就可以看到他的作用了。
+接下来是获取代理对象对应的原始集合对象，在只读模式下，readonly 方法可以对 响应式对象进行处理，所以需要再调用 `toRaw`方法对 target 再转一次，
+此时拿到的 `rawTarget` 一定是原生集合对象。除了对集合转换，对于 key 也是需要 `toRaw` 一下的，理由是，集合的 key 可以是对象类型，那就有可能是响应式的，所以也需要转一下拿到原始值。此时我们就名白了传入的代理对象，经过 toRaw 后可以拿到 其对应的原始集合，这样就解决了代理内部因没有 `internal slots`（内部插槽）访问报错的问题了。实在是太机制了，哈哈哈！然后进行依赖收集，最后根据不同模式，拿到对应的响应式转换方法，对对象类型的属性值进行惰性响应式处理（这里跟 baseHandler 里的 get 方法类似），这里提一个小点，还记得我们之前在 `baseHandler` 的 get 方法最后看到的 `ref` 解套吗？当时说 `从 Array 或者 Map 等原生集合类中访问 ref 时，不会自动解套` ，你看这里就体现了这句话，我们并没有看到有关 `ref`的解套处理逻辑。
+
+##### size
+
+```js
+//插装方法 size,获取集合长度
+//all Collection
+function size(target: IterableCollections, isReadonly = false) {
+  //获取到原始集合对象
+  target = (target as any)[ReactiveFlags.RAW]
+  //非只读模式下去收集依赖(这里是依赖收集track而不是trigger，因为size是一个获取属性)
+  !isReadonly && track(toRaw(target), TrackOpTypes.ITERATE, ITERATE_KEY)
+  //这里 size 因为是属性，不是方法，所以通过Reflect.get获取
+  return Reflect.get(target, 'size', target)
+}
+```
+
+##### has
+
+```js
+//插装方法 has,查询 key 是否存在于集合中，
+//all Collection
+//tip: 会发现参数列表第一个参数为 this,但是又会发现调用的地方并没有传 this，怎么回事呢，这是 ts 的语法特性，
+//在 ts 里是假的参数，放在第一位，用来指定函数中 this 的类型,调用的地方是不需要传这个参数的，后面方法也是相同情况。
+function has(this: CollectionTypes, key: unknown, isReadonly = false): boolean {
+const target = (this as any)[ReactiveFlags.RAW]
+const rawTarget = toRaw(target)
+const rawKey = toRaw(key)
+//属于查询方法，因此会执行依赖收集，触发 track 方法。
+if (key !== rawKey) {
+!isReadonly && track(rawTarget, TrackOpTypes.HAS, key)
+}
+!isReadonly && track(rawTarget, TrackOpTypes.HAS, rawKey)
+return key === rawKey
+? target.has(key)
+: target.has(key) || target.has(rawKey)
+}
+```
+
+`size` 属性 和 `has` 方法逻辑也比较简单，就放到一起说了，首先 `size` 是个获取集合长度的插装属性，`has` 是个查询 `key` 是否存在于集合中的查询方法，都属于查询类，因此内部都会调用 `track`进行依赖收集，其次它们的入参 `target` 是个代理对象，因此内部需要 `toRaw` 一下，拿到原始集合对象，然后调用内部方法/属性访问内置属性
+
+##### add
+
+```js
+//插装方法 add,往集合 internal slots(内置插槽) 中存属性值
+//set ,MapSet
+function add(this: SetTypes, value: unknown) {
+  //add是操作 set集合 的存值方法，value直接就是要存的属性值。
+  //获取原始数据
+  value = toRaw(value)
+  //获取原始集合对象（这里的this是原始目标集合的proxy代理对象）
+  const target = toRaw(this)
+  //获取原型
+  const proto = getProto(target)
+  //调用原型上的 has 方法判断 value是否已经存在，返回布尔值
+  const hadKey = proto.has.call(target, value)
+  //添加属性
+  const result = target.add(value)
+  //如果不存在，说明是新值，则去触发依赖更新，否则不去触发，因为重新赋的是已经存在的属性值的。
+  if (!hadKey) {
+    trigger(target, TriggerOpTypes.ADD, value, value)
+  }
+  //返回添加属性值后的 Set 结构本身
+  return result
+}
+```
+
+`add` 是捕获劫持 `set` 集合添加属性的方法。`this` 含义同上,首先拿到原始 value 和原始集合对象，再获取原型方法，接下里通过 .add 添加属性进集合中，
+最后调用 `trigger` 触发依赖更新。
+
+##### set
+
+```js
+//插装方法 set,往Map集合 internal slots(内置插槽) 中设置属性/修改 [key,value]
+//Map ,WeakMap
+function set(this: MapTypes, key: unknown, value: unknown) {
+  //获取原始数据
+  value = toRaw(value)
+  //获取原始集合对象（这里的this是原始目标集合的proxy代理对象）
+  const target = toRaw(this)
+  //获取 has,get原型方法
+  const { has, get } = getProto(target)
+  //判断key是否已经存在
+  let hadKey = has.call(target, key)
+  //不存在，对 key 进行 toRaw转换后再判断（key，可以是对象，因此有可能是一个proxy代理对象）
+  if (!hadKey) {
+    key = toRaw(key)
+    hadKey = has.call(target, key)
+  } else if (__DEV__) {
+    checkIdentityKeys(target, has, key)
+  }
+  //获取旧属性值，以及存入新属性值
+  const oldValue = get.call(target, key)
+  const result = target.set(key, value)
+  //触发依赖更新
+  if (!hadKey) {
+    trigger(target, TriggerOpTypes.ADD, key, value)
+  } else if (hasChanged(value, oldValue)) {
+    trigger(target, TriggerOpTypes.SET, key, value, oldValue)
+  }
+  return result
+}
+```
+
+`set` 与 `get`相对应，都是用来操作 `Map`集合的方法，`set` 的原理跟 `add` 差不多，注释也比较详细，就不多啰嗦了。
+
+##### delete
+
+```js
+//插装方法 delete,删除Map/set集合 internal slots(内置插槽) 中的属性
+//Map ,WeakMap，Set,WeakSet
+function deleteEntry(this: CollectionTypes, key: unknown) {
+  const target = toRaw(this)
+  const { has, get } = getProto(target)
+  let hadKey = has.call(target, key)
+  if (!hadKey) {
+    key = toRaw(key)
+    hadKey = has.call(target, key)
+  } else if (__DEV__) {
+    checkIdentityKeys(target, has, key)
+  }
+  //这里对 get 进行存在性判断原因是，对于set集合，get方法是不存在的。
+  const oldValue = get ? get.call(target, key) : undefined
+  // forward the operation before queueing reactions
+  //在去更新依赖之前先执行删除操作
+  const result = target.delete(key)
+  //去触发依赖更新，类型为 delete，会更新依赖的值为 undefined
+  if (hadKey) {
+    trigger(target, TriggerOpTypes.DELETE, key, undefined, oldValue)
+  }
+  return result
+}
+```
+
+##### clear
+
+```js
+//插装方法 clear,清空Map/set集合 internal slots(内置插槽)
+//Map,Set(WeakSet,WeakMap 没有此方法)
+function clear(this: IterableCollections) {
+  const target = toRaw(this)
+  const hadItems = target.size !== 0
+  const oldTarget = __DEV__
+    ? isMap(target)
+      ? new Map(target)
+      : new Set(target)
+    : undefined
+  // forward the operation before queueing reactions
+  const result = target.clear()
+  if (hadItems) {
+    trigger(target, TriggerOpTypes.CLEAR, undefined, undefined, oldTarget)
+  }
+  return result
+}
+```
+
+`deleteEntry` 内部会调用 `delete` 是删除 Map/set 集合 internal slots(内置插槽) 中的属性时会触发的捕获器函数，最后触发依赖更新的时候会将
+依赖的值更新为 `undefined`。
+
+`clear` 只能用户 `Set` ，`Map` 集合清空内置插槽时触发，不能用于 `WeakSet`，`WeakMap` ，该方法触发会更新整个集合的依赖。
 
 
-##### collectionHandlers
+##### forEach
 
+```js
+//插装迭代器方法forEach
+//Set Map
+function createForEach(isReadonly: boolean, isShallow: boolean) {
+  return function forEach(
+    this: IterableCollections,
+    callback: Function,
+    thisArg?: unknown //可以显式指定this，默认为集合对象本身。
+  ) {
+    const observed = this as any //迭代对象，一般为集合的代理对象
+    const target = observed[ReactiveFlags.RAW] //获取到代理对象对应的原始集合对象，因为有可能是个reative，下面会再toRaw一下
+    const rawTarget = toRaw(target) //真正的原始集合对象
+    //不同模式下的转化方法
+    const wrap = isReadonly ? toReadonly : isShallow ? toShallow : toReactive
+    //非只读模式下依赖收集（遍历就是查询操作）
+    !isReadonly && track(rawTarget, TrackOpTypes.ITERATE, ITERATE_KEY)
+    //执行遍历
+    return target.forEach((value: unknown, key: unknown) => {
+      // important: make sure the callback is
+      // 1. invoked with the reactive map as `this` and 3rd arg
+      // 2. the value received should be a corresponding reactive/readonly.
+      //执行 callback 回调
+      //thisArg是传入的callback方法的调用者，可以显式指定，默认为传入的集合代理对象
+      //这里会使用 wrap 函数会对key,value 进行响应式转换，原因是 forEach方法只能被原始集合调用，不能被代理调用，
+      //那遍历得到的 value,key是原始值，失去了响应性，因此需要再次处理来恢复响应性。
+      return callback.call(thisArg, wrap(value), wrap(key), observed)
+    })
+  }
+}
+```
+`createForEach` 方法会返回一个迭代器方法 `forEach` 。当遍历集合的时候会触发该捕获器方法。该方法可以显式指定 `callback` 回调的调用者 `this`,
+迭代属于查询，因为内部会触发 `track` 收集依赖。最后调用 `callback` 的时候 会对 value, key 进行响应式处理，使其恢复响应式。
 
+到这里关于  `mutableInstrumentations` 插装对象中的几个 `插装方法`就分析完了，这是 `mutableCollectionHandlers` 下的，对于 `shallowCollectionHandlers` 和 `readonlyCollectionHandlers` 都是它的特殊处理版本，基本一致，我们就不去费分析了，稍稍看下就明白了。
 
+最后还有一个 `iteratorMethods` ,也是迭代器相关的方法，建议还是直接看源码吧，也就不多哔哔了（其实是怕哔哔不出来，说不清，道不明，哈哈哈）。
+
+至此，关于 `reactive` 章节的源码内容就分析完了。有没有感觉很爽的样子，哈哈哈。下一章我们就分析千呼万唤使都使不出来，终于要出来了的 effect,相信一定会刺激的飞起。

@@ -368,7 +368,7 @@ function createInstrumentationGetter(isReadonly: boolean, shallow: boolean) {
       : mutableInstrumentations
   //返回的getter
   return (
-    target: CollectionTypes,
+    target: CollectionTypes,//proxy代理对应的原始集合对象
     key: string | symbol,
     receiver: CollectionTypes
   ) => {
