@@ -655,9 +655,7 @@ p.set('d', 4)
 ```
 
 会发现报错了，咋还报错了呢，写法没毛病啊！其实这里不是你的错，不是我的错，是集合内部设计的问题。这不是你说的，也不是我说的，是人家 [文档](https://javascript.info/proxy#built-in-objects-internal-slots) 说的。截图为证。
-
 ![](https://github.com/HUYIJUNCODING/vue-next-analysis/blob/master/doc/assets/proxy_limit.png)
-
 > 大概意思就是集合(`Map`，`Set`，`WeakMap`，`WeakSet`，其实还有 `Date`，`Promise` 等这里不涉及，所以就不讨论)，它们内部都有一个 `internal slots`（内部插槽），是用来存储属性数据的。这些属性数据在访问的时候可以被集合的内置方法直接访问（get,set,has 等），而不通过[[Get]] / [[Set]]内部方法访问它们。因此代理无法拦截。
 
 这里使用代理对象调用集合内置方法的形式去访问，此时代理对象内部并没有 `internal slots` ，但是内置方法 `Map.prototype.set/get`不知道， 会尝试访问内部属性 this.[[MapData]]，此时由于 `this == proxy`，无法在代理中找到它，就报错了，表示访问属性失败。
@@ -678,7 +676,7 @@ p.set('d', 4)
 console.log(p.get('d')) //打印结果： 4
 ```
 
-可以看到代码正常运行，且成功打印设置的属性值，稍作分析，我们就可以看出差别，原来啊对我去到的结果做了一次判断，如果返回值的类型为
+可以看到代码正常运行，且成功打印设置的属性值，稍作分析，我们就可以看出差别，原来啊，对取到的结果做了一次判断，如果返回值的类型为
 函数类型，则手动给绑定 this 执行（target 目标对象）这样，这个方法无论谁调用，内部的 this 永远指向原始的目标集合对象，所以内置方法就可以直接访问
 `internal slots`（内部插槽）。那现在大概就明白了为啥集合代理的 handler 只有 get 捕获器方法了吧。那明白了原因后，我们继续看源码, get trap 方法是调用 `createInstrumentationGetter` 方法来初始化的，那我们就去找到这个方法看看内部实现。
 
@@ -723,7 +721,6 @@ function createInstrumentationGetter(isReadonly: boolean, shallow: boolean) {
 ```
 
 会发现 `createInstrumentationGetter` 接收两个参数，分别控制不同模式下的创建，这种方式应该有印象，在 `baseHandlers` 中见过。
-
 然后定义了一个变量来接收不同模式下的 `instrumentations` 对象（称为插装对象），这个插装对象内部属性为复写的集合内置方法（会发现跟前面 baseHandlers 中的数组行为类似），同样我们也拿过来看下（这里我们就只把 `mutableInstrumentations` 拿过来，其他两种模式跟它差不多）
 
 ```js
@@ -750,7 +747,7 @@ const mutableInstrumentations: Record<string, Function> = {
 
 - 如果 key 是`get`、`has`、`add`、`set`、`delete`、`clear`、`forEach`，或者`size`，表示是调用集合的内置方法，则将 `target` 用 `instrumentations` 替代，否则表示是获取普通属性行为，目标对象还是 `target` 然后将获取结果返回（内置方法或者属性值）
 
-好了，下来对几个插装方法/属性进行分析
+好了，下来对几个插装方法/属性进行分析。
 
 ##### get
 
