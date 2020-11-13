@@ -12,10 +12,10 @@ const { ref,createApp, reactive, computed, watchEffect, onMounted, onUnmounted }
 createApp({
   setup () {
     const count = ref(0);
-    const map = reactive(new Map([['a',1],['b',2]]))
-
-    map.set('c',3)
-    console.log(map,'map')
+    const map = reactive(new Map([[{'cx':'cc'},{'a1':11}],['b',2]]))
+    map.forEach((value,key,receiver)=> {
+      console.log(value,key,receiver,'---')
+    },{})
     // onMounted(() => {})
     return {
         count

@@ -18,22 +18,24 @@ type IterableCollections = Map<any, any> | Set<any>
 type WeakCollections = WeakMap<any, any> | WeakSet<any>
 type MapTypes = Map<any, any> | WeakMap<any, any>
 type SetTypes = Set<any> | WeakSet<any>
-
+//不同模式下的转换为响应式的方法
+//普通模式（可读可写模式下）
 const toReactive = <T extends unknown>(value: T): T =>
   isObject(value) ? reactive(value) : value
-
+//只读模式下
 const toReadonly = <T extends unknown>(value: T): T =>
   isObject(value) ? readonly(value as Record<any, any>) : value
-
+//浅层模式下
 const toShallow = <T extends unknown>(value: T): T => value
 
+//获取集合的原型对象
 const getProto = <T extends CollectionTypes>(v: T): any =>
   Reflect.getPrototypeOf(v)
 
 //插装方法 get,访问集合 internal slots(内置插槽) 中存放的属性
 //Map,WeakMap
 function get(
-  target: MapTypes,//这里需要注意 target 目标对象不是 原始集合对象，而是 它的代理对象
+  target: MapTypes, //这里需要注意 target 目标对象不是 原始集合对象，而是 它的代理对象
   key: unknown,
   isReadonly = false,
   isShallow = false
@@ -64,11 +66,15 @@ function get(
     return wrap(target.get(rawKey))
   }
 }
-
+//插装方法 has,查询key是否存在于集合中，
+//all Collection
+//tip: 会发现参数列表第一个参数为this,但是又会发现调用的地方并没有传this，怎么回事呢，这是ts的语法特性，
+//在 ts 里是假的参数，放在第一位，用来指定函数中this的类型,调用的地方是不需要传这个参数的，后面方法也是相同情况。
 function has(this: CollectionTypes, key: unknown, isReadonly = false): boolean {
   const target = (this as any)[ReactiveFlags.RAW]
   const rawTarget = toRaw(target)
   const rawKey = toRaw(key)
+  //属于查询方法，因此会执行依赖收集，触发 track 方法。
   if (key !== rawKey) {
     !isReadonly && track(rawTarget, TrackOpTypes.HAS, key)
   }
@@ -80,39 +86,57 @@ function has(this: CollectionTypes, key: unknown, isReadonly = false): boolean {
 //插装方法 size,获取集合长度
 //all Collection
 function size(target: IterableCollections, isReadonly = false) {
+  //获取到原始集合对象
   target = (target as any)[ReactiveFlags.RAW]
+  //非只读模式下去收集依赖(这里是依赖收集track而不是trigger，因为size是一个获取属性)
   !isReadonly && track(toRaw(target), TrackOpTypes.ITERATE, ITERATE_KEY)
+  //这里 size 因为是属性，不是方法，所以通过Reflect.get获取
   return Reflect.get(target, 'size', target)
 }
 //插装方法 add,往集合 internal slots(内置插槽) 中存属性值
 //set ,MapSet
 function add(this: SetTypes, value: unknown) {
+  //add是操作 set集合 的存值方法，value直接就是要存的属性值。
+  //获取原始数据
   value = toRaw(value)
+  //获取原始集合对象（这里的this是原始目标集合的proxy代理对象）
   const target = toRaw(this)
+  //获取原型
   const proto = getProto(target)
+  //调用原型上的 has 方法判断 value是否已经存在，返回布尔值
   const hadKey = proto.has.call(target, value)
+  //添加属性
   const result = target.add(value)
+  //如果不存在，说明是新值，则去触发依赖更新，否则不去触发，因为重新赋的是已经存在的属性值的。
   if (!hadKey) {
     trigger(target, TriggerOpTypes.ADD, value, value)
   }
+  //返回添加属性值后的 Set 结构本身
   return result
 }
 
+//插装方法 set,往Map集合 internal slots(内置插槽) 中设置属性/修改 [key,value]
+//Map ,WeakMap
 function set(this: MapTypes, key: unknown, value: unknown) {
+  //获取原始数据
   value = toRaw(value)
+  //获取原始集合对象（这里的this是原始目标集合的proxy代理对象）
   const target = toRaw(this)
+  //获取 has,get原型方法
   const { has, get } = getProto(target)
-
+  //判断key是否已经存在
   let hadKey = has.call(target, key)
+  //不存在，对 key 进行 toRaw转换后再判断（key，可以是对象，因此有可能是一个proxy代理对象）
   if (!hadKey) {
     key = toRaw(key)
     hadKey = has.call(target, key)
   } else if (__DEV__) {
     checkIdentityKeys(target, has, key)
   }
-
+  //获取旧属性值，以及存入新属性值
   const oldValue = get.call(target, key)
   const result = target.set(key, value)
+  //触发依赖更新
   if (!hadKey) {
     trigger(target, TriggerOpTypes.ADD, key, value)
   } else if (hasChanged(value, oldValue)) {
@@ -120,7 +144,8 @@ function set(this: MapTypes, key: unknown, value: unknown) {
   }
   return result
 }
-
+//插装方法 delete,删除Map/set集合 internal slots(内置插槽) 中的属性
+//Map ,WeakMap，Set,WeakSet
 function deleteEntry(this: CollectionTypes, key: unknown) {
   const target = toRaw(this)
   const { has, get } = getProto(target)
@@ -131,16 +156,19 @@ function deleteEntry(this: CollectionTypes, key: unknown) {
   } else if (__DEV__) {
     checkIdentityKeys(target, has, key)
   }
-
+  //这里对 get 进行存在性判断原因是，对于set集合，get方法是不存在的。
   const oldValue = get ? get.call(target, key) : undefined
   // forward the operation before queueing reactions
+  //在去更新依赖之前先执行删除操作
   const result = target.delete(key)
+  //去触发依赖更新，类型为 delete，会更新依赖的值为 undefined
   if (hadKey) {
     trigger(target, TriggerOpTypes.DELETE, key, undefined, oldValue)
   }
   return result
 }
-
+//插装方法 clear,清空Map/set集合 internal slots(内置插槽)
+//Map,Set(WeakSet,WeakMap没有此方法)
 function clear(this: IterableCollections) {
   const target = toRaw(this)
   const hadItems = target.size !== 0
@@ -156,22 +184,30 @@ function clear(this: IterableCollections) {
   }
   return result
 }
-
+//插装迭代方法forEach
+//Set Map
 function createForEach(isReadonly: boolean, isShallow: boolean) {
   return function forEach(
     this: IterableCollections,
     callback: Function,
-    thisArg?: unknown
+    thisArg?: unknown //可以显式指定this，默认为集合对象本身。
   ) {
-    const observed = this as any
-    const target = observed[ReactiveFlags.RAW]
-    const rawTarget = toRaw(target)
+    const observed = this as any //迭代对象，一般为集合的代理对象
+    const target = observed[ReactiveFlags.RAW] //获取到代理对象对应的原始集合对象，因为有可能是个reative，下面会再toRaw一下
+    const rawTarget = toRaw(target) //真正的原始集合对象
+    //不同模式下的转化方法
     const wrap = isReadonly ? toReadonly : isShallow ? toShallow : toReactive
+    //非只读模式下依赖收集（遍历就是查询操作）
     !isReadonly && track(rawTarget, TrackOpTypes.ITERATE, ITERATE_KEY)
+    //执行遍历
     return target.forEach((value: unknown, key: unknown) => {
       // important: make sure the callback is
       // 1. invoked with the reactive map as `this` and 3rd arg
       // 2. the value received should be a corresponding reactive/readonly.
+      //执行 callback 回调
+      //thisArg是传入的callback方法的调用者，可以显式指定，默认为传入的集合代理对象
+      //这里会使用 wrap 函数会对key,value 进行响应式转换，原因是 forEach方法只能被原始集合调用，不能被代理调用，
+      //那遍历得到的 value,key是原始值，失去了响应性，因此需要再次处理来恢复响应性。
       return callback.call(thisArg, wrap(value), wrap(key), observed)
     })
   }
@@ -190,23 +226,29 @@ interface IterationResult {
   done: boolean
 }
 
+//创建迭代方法
 function createIterableMethod(
-  method: string | symbol,
+  method: string | symbol, //方法名
   isReadonly: boolean,
   isShallow: boolean
 ) {
   return function(
-    this: IterableCollections,
+    this: IterableCollections, //在 ts 里是假的参数，放在第一位，用来指定函数中this的类型,调用的地方是不需要传这个参数的
     ...args: unknown[]
   ): Iterable & Iterator {
     const target = (this as any)[ReactiveFlags.RAW]
     const rawTarget = toRaw(target)
     const targetIsMap = isMap(rawTarget)
+    // 如果是entries方法，或者是map的迭代方法的话，isPair为true
+    // 这种情况下，迭代器方法返回的是一个[key, value]的结构
     const isPair =
       method === 'entries' || (method === Symbol.iterator && targetIsMap)
     const isKeyOnly = method === 'keys' && targetIsMap
+    // 调用原型上的对应迭代器方法
     const innerIterator = target[method](...args)
+    // 获取不同模式下的响应式转化方法
     const wrap = isReadonly ? toReadonly : isShallow ? toShallow : toReactive
+    //非只读模式下，依赖收集
     !isReadonly &&
       track(
         rawTarget,
@@ -215,11 +257,12 @@ function createIterableMethod(
       )
     // return a wrapped iterator which returns observed versions of the
     // values emitted from the real iterator
+    // 给返回的innerIterator插装，将其value值转为响应式数据
     return {
       // iterator protocol
       next() {
         const { value, done } = innerIterator.next()
-        return done
+        return done // 为done的时候，value是最后一个值的next，是undefined，没必要做响应式转换了
           ? { value, done }
           : {
               value: isPair ? [wrap(value[0]), wrap(value[1])] : wrap(value),
@@ -250,7 +293,6 @@ function createReadonlyMethod(type: TriggerOpTypes): Function {
 //可变集合handler中的插装对象（属性为复写集合的内置方法，也称为 “插装方法”）
 const mutableInstrumentations: Record<string, Function> = {
   //插装方法
-
   get(this: MapTypes, key: unknown) {
     return get(this, key)
   },
@@ -297,7 +339,7 @@ const readonlyInstrumentations: Record<string, Function> = {
   clear: createReadonlyMethod(TriggerOpTypes.CLEAR),
   forEach: createForEach(true, false)
 }
-//集合的迭代方法调用
+//集合的迭代器相关方法
 const iteratorMethods = ['keys', 'values', 'entries', Symbol.iterator]
 iteratorMethods.forEach(method => {
   mutableInstrumentations[method as string] = createIterableMethod(
@@ -366,16 +408,15 @@ export const mutableCollectionHandlers: ProxyHandler<CollectionTypes> = {
   // get trap(捕获器)方法。
   get: createInstrumentationGetter(false, false) //isReadonly: false, shallow: false
 }
-
+//浅层模式集合代理handler
 export const shallowCollectionHandlers: ProxyHandler<CollectionTypes> = {
   get: createInstrumentationGetter(false, true)
 }
-
+//只读模式集合代理handler
 export const readonlyCollectionHandlers: ProxyHandler<CollectionTypes> = {
   get: createInstrumentationGetter(true, false)
 }
 
-//检测集合中是否已经存在相同key
 function checkIdentityKeys(
   target: CollectionTypes,
   has: (key: unknown) => boolean,
