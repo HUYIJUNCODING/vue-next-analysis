@@ -1,11 +1,11 @@
 <script src="../../dist/vue.global.js"></script>
 
 <div id="app">
-    <div>{{count}}</div>
+    <div></div>
 </div>
 
 <script>
-const { ref,createApp, reactive, computed, watchEffect, onMounted, onUnmounted } = Vue
+const { ref,createApp, reactive, computed, watchEffect,watch, onMounted, onUnmounted } = Vue
 
 
 
@@ -13,12 +13,20 @@ createApp({
   setup () {
     const count = ref(0);
     const map = reactive(new Map([[{'cx':'cc'},{'a1':11}],['b',2]]))
-    map.forEach((value,key,receiver)=> {
-      console.log(value,key,receiver,'---')
-    },{})
+    const state = reactive({ count: 0 })
+
+    watch(
+      () => state.count,
+      (count, prevCount) => {
+        /* ... */
+        console.log(prevCount,count)
+      }
+    )
+    state.count = 1;
     // onMounted(() => {})
     return {
-        count
+      count,
+      state
     }
   }
 

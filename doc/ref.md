@@ -8,7 +8,7 @@
 
 - 虽然明白了其作用,但并不清楚内部实现过。所以，带着这样的好奇，接下来我们就深入到它的源码层面,来一探究竟其实现原理。
 
-* [ref源代码传送门](https://github.com/HUYIJUNCODING/vue-next-analysis/blob/master/packages/reactivity/src/ref.ts)
+* [ref篇源代码传送门](https://github.com/HUYIJUNCODING/vue-next-analysis/blob/master/packages/reactivity/src/ref.ts)
 
 ### 源码分析
 

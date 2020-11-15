@@ -14,8 +14,8 @@ export interface ReactiveEffect<T = any> {
   (): T //ReactiveEffect函数
   _isEffect: true //用来标识是effect类型
   id: number //id号
-  active: boolean //active是effect激活的开关，打开会收集依赖，关闭会导致收集依赖无效
-  raw: () => T // 原始监听函数
+  active: boolean //active是激活effect的开关，打开会收集依赖，关闭会导致收集依赖无效
+  raw: () => T // 监听函数的原始函数
   deps: Array<Dep> // 存储依赖(effect)的deps
   options: ReactiveEffectOptions // 相关选项
   allowRecurse: boolean //是否允许递归
@@ -31,6 +31,7 @@ export interface ReactiveEffectOptions {
   allowRecurse?: boolean //是否允许递归
 }
 
+//debugger 事件
 export type DebuggerEvent = {
   effect: ReactiveEffect
   target: object
@@ -38,6 +39,7 @@ export type DebuggerEvent = {
   key: any
 } & DebuggerEventExtraInfo
 
+// debugger扩展信息
 export interface DebuggerEventExtraInfo {
   newValue?: any
   oldValue?: any
@@ -52,15 +54,15 @@ let activeEffect: ReactiveEffect | undefined
 export const ITERATE_KEY = Symbol(__DEV__ ? 'iterate' : '')
 export const MAP_KEY_ITERATE_KEY = Symbol(__DEV__ ? 'Map key iterate' : '')
 
-//判断一个含漱液是否是effect,判断标识为_isEffect属性,如果不是,则没有该属性标识
+//判断一个函数是否是effect,判断标识为_isEffect属性,如果不是,则没有该属性标识
 export function isEffect(fn: any): fn is ReactiveEffect {
   return fn && fn._isEffect === true
 }
 
 //effect函数(依赖监听函数)
 export function effect<T = any>(
-  fn: () => T, //监听函数(其实这里称呼为副作用函数更为贴切,官方文档就是这样叫的)
-  options: ReactiveEffectOptions = EMPTY_OBJ //选项
+  fn: () => T, //监听函数对应的原始函数
+  options: ReactiveEffectOptions = EMPTY_OBJ //配置项
 ): ReactiveEffect<T> {
   //如果fn 已经是一个effect,则直接从raw获取,则不用去重新创建(已经创建过了,可以理解为直接从缓存中拿)
   if (isEffect(fn)) {
@@ -72,6 +74,7 @@ export function effect<T = any>(
   if (!options.lazy) {
     effect()
   }
+  //返回创建好的副作用函数
   return effect
 }
 
