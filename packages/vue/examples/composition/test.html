@@ -14,15 +14,21 @@ createApp({
     const count = ref(0);
     const map = reactive(new Map([[{'cx':'cc'},{'a1':11}],['b',2]]))
     const state = reactive({ count: 0 })
-
-    watch(
-      () => state.count,
-      (count, prevCount) => {
-        /* ... */
-        console.log(prevCount,count)
-      }
-    )
-    state.count = 1;
+    
+    watchEffect(()=> {
+      let dump = count.value
+    },{
+      flush: 'sync'
+    })
+    count.value = 1;
+    // watch(
+    //   () => state.count,
+    //   (count, prevCount) => {
+    //     /* ... */
+    //     console.log(prevCount,count)
+    //   }
+    // )
+    // state.count = 1;
     // onMounted(() => {})
     return {
       count,

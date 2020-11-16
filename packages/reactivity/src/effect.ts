@@ -59,10 +59,10 @@ export function isEffect(fn: any): fn is ReactiveEffect {
   return fn && fn._isEffect === true
 }
 
-//effect函数(依赖监听函数)
+//创建侦听器的工厂函数effect
 export function effect<T = any>(
-  fn: () => T, //监听函数对应的原始函数
-  options: ReactiveEffectOptions = EMPTY_OBJ //配置项
+  fn: () => T, //包装了源数据的原始函数
+  options: ReactiveEffectOptions = EMPTY_OBJ //配置项，可以是 { immediate, deep, flush, onTrack, onTrigger }
 ): ReactiveEffect<T> {
   //如果fn 已经是一个effect,则直接从raw获取,则不用去重新创建(已经创建过了,可以理解为直接从缓存中拿)
   if (isEffect(fn)) {
