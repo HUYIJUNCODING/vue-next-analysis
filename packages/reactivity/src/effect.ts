@@ -15,7 +15,7 @@ export interface ReactiveEffect<T = any> {
   _isEffect: true //用来标识是effect类型
   id: number //id号
   active: boolean //active是激活effect的开关，打开会收集依赖，关闭会导致收集依赖无效
-  raw: () => T // 监听函数的原始函数
+  raw: () => T // 侦听函数的原始函数
   deps: Array<Dep> // 存储依赖(effect)的deps
   options: ReactiveEffectOptions // 相关选项
   allowRecurse: boolean //是否允许递归
@@ -54,31 +54,35 @@ let activeEffect: ReactiveEffect | undefined
 export const ITERATE_KEY = Symbol(__DEV__ ? 'iterate' : '')
 export const MAP_KEY_ITERATE_KEY = Symbol(__DEV__ ? 'Map key iterate' : '')
 
-//判断一个函数是否是effect,判断标识为_isEffect属性,如果不是,则没有该属性标识
+//判断传入的fn是否已经是一个侦听函数了,判断标识为_isEffect属性,如果不是,则没有该属性标识
 export function isEffect(fn: any): fn is ReactiveEffect {
   return fn && fn._isEffect === true
 }
 
-//创建侦听器的工厂函数effect
+//创建侦听函数的工厂函数effect
 export function effect<T = any>(
   fn: () => T, //包装了源数据的原始函数
   options: ReactiveEffectOptions = EMPTY_OBJ //配置项，可以是 { immediate, deep, flush, onTrack, onTrigger }
 ): ReactiveEffect<T> {
-  //如果fn 已经是一个effect,则直接从raw获取,则不用去重新创建(已经创建过了,可以理解为直接从缓存中拿)
+  //如果传入的 fn 源数据函数已经是一个侦听函数了(创建过了)那此时它内部会挂载有一个raw属性,用来缓存原函数体,
+  //当再次被传入时会自动获取到其内部的源函数,然后会使用源函数创建一个新的侦听函数，所以effect始终会返回一个新创建的侦听函数。
   if (isEffect(fn)) {
     fn = fn.raw
   }
-  //初始化 effect (createReactiveEffect)
+  //执行创建的函数
   const effect = createReactiveEffect(fn, options)
-  //这里就是optins选项,默认effect会立即执行,可以设置lazy
+  //lazy 是 options 选项的一个配置属性，如果 为true 则会懒执行副作用，反之会在侦听函数创建完后立即执行一次副作用
+  //vue组件实例中，lazy属性默认是true（在vue.global.js中会看到），但是在vue组建中 lazy 默认为true并不和effect创建后默认会立即执行一次
+  //的逻辑相冲突，因为在  vue.global.js 中我们看到了，有关很多条件的判断，所以，如果是 watchEffect则会在effect创建完以后去主动调用一次
+  //runner 也就是这里的 effect。
   if (!options.lazy) {
     effect()
   }
-  //返回创建好的副作用函数
+  //返回侦听函数
   return effect
 }
 
-//停止侦听的函数(该函数会在watch/watchEffect返回的函数中调用,例如官方文档所说的stop(),内部就是调用的是该函数来停止依赖监听)
+//停止侦听的函数(该函数会在watch/watchEffect返回的函数中调用,例如官方文档所说的stop(),内部就是调用的是该函数来停止依赖侦听)
 export function stop(effect: ReactiveEffect) {
   // 如果当前effect是active的,则清除其内部所有依赖(清空deps)
   if (effect.active) {
@@ -88,57 +92,64 @@ export function stop(effect: ReactiveEffect) {
     if (effect.options.onStop) {
       effect.options.onStop()
     }
-    // active标记为false，标识这个effect已经停止收集依赖了(停止依赖监听)
+    // active标记为false，标识这个effect已经停止收集依赖了(停止依赖侦听)
     effect.active = false
   }
 }
 
-let uid = 0
+let uid = 0 //id 标识，应该是用来标识唯一性的，不用去细究
 
-//创建 effect
+//执行创建侦听函数
 function createReactiveEffect<T = any>(
-  fn: () => T,
-  options: ReactiveEffectOptions
+  fn: () => T, //源数据函数
+  options: ReactiveEffectOptions //配置项 可以是 { immediate, deep, flush, onTrack, onTrigger }
 ): ReactiveEffect<T> {
-  //初始化 effect 函数(effect本身是一个函数,因为函数也是object类型,因此在其上可以扩展一些有用属性)
+  //初始化一个侦听函数，函数本质也是对象，所以可以挂载/扩展一些有用的属性
   const effect = function reactiveEffect(): unknown {
-    //当active标记为false，scheduler 为true 直接调用副作用函数
+    //active 是 effect 侦听函数上扩展的一个属性，默认 active 为true,表示一个有效的侦听函数，当侦听属性的值发生变化时就会去
+    //执行副作用，active 为false 的唯一时机是 stop方法触发，就是上面这个stop函数，此时，侦听函数就会失去侦听的能力，即响应性失效
     if (!effect.active) {
+      //scheduler 是自定义调度器，用来调度触发侦听函数，会看到如果侦听函数失效后，如果自定了调度器，那么会直接返回undefined来终止
+      //程序继续进行，如果没有自定义调度器，则执行源数据函数，这时候因为依赖都被移除掉了，因此是不会触发依赖收集操作，相当于执行了一次普通的
+      //函数调用而已
       return options.scheduler ? undefined : fn()
     }
-    //只有当前effect不在effectStack中，才会去执行副作用函数fn,进而进行依赖收集
+    //这里进行一次effectStack 中是否有 effect 判断的目的是为了防止同一个侦听函数被连续触发多次引起死递归。
+    //假如此时正在执行副作用函数，该函数内部有修改依赖属性的操作，修改会触发 trigger， 进而
+    //会再次触发侦听函数执行，然后副作用函数执行，这样当前的副作用函数就会无限递归下去，因此为了避免此现象发生，就会在副作用
+    //函数执行之前进行先一次判断。如果当前侦听函数还没有出栈，就啥也不执行。
     if (!effectStack.includes(effect)) {
-      //执行副作用函数前(收集依赖前)，先清理一次effect的依赖(清空deps)
-      // 先清理一次的目的是重新对同一个属性创建新的依赖监听时，先把原始监听的依赖移除,避免出现重复依赖收集的情况,始终保持对同一个属性的依赖不重复
+      //cleanup 函数的作用有两个，1：会移除掉依赖映射表(targetMap)里面的effect侦听器函数（也叫依赖函数），2：清空effect侦听函数中的deps
+      //会发现 cleanup 操作是在每次即将执行副作用函数之前执行的，也就是在每次依赖重新收集之前会清空之前的依赖。这样做的目的是为了保证
+      //依赖属性时刻对应最新的侦听函数。
       cleanup(effect)
       try {
-        //当前effect 入栈,并激活为 activeEffect,然后执行副作用函数
+        //当前effect侦听函数 入栈,并激活设置为 activeEffect
         enableTracking()
         effectStack.push(effect)
         activeEffect = effect
-        //fn为副作用函数,若该函数里的响应式对象有取值操作,则会触发getter,getter里会调用track()方法,进而实现依赖的重新收集
+        //fn为副作用函数,若该函数里的响应式对象有属性的访问操作,则会触发getter,getter里会调用track()方法,进而实现依赖的重新收集
         return fn()
       } finally {
-        //fn副作用函数执行完后,表示依赖收集完毕,则当前effect出栈,并移除激活态activeEffect
+        //副作用函数执行完后,当前effect副作用函数出栈,并撤销激活态
         effectStack.pop()
         resetTracking()
         activeEffect = effectStack[effectStack.length - 1]
       }
     }
   } as ReactiveEffect
-  //函数也是对象类型,因此可以给effect扩展一些有用的属性
-  effect.id = uid++ //id
-  effect.allowRecurse = !!options.allowRecurse //是否允许递归
-  effect._isEffect = true //effect 标识
-  effect.active = true //激活态(为true时才允许依赖收集)
-  effect.raw = fn //缓存 fn 原始副作用函数
-  effect.deps = [] //存储依赖
-  effect.options = options //选项
-  return effect
+  //函数也是对象类型,因此可以给effect侦听扩展一些有用的属性
+  effect.id = uid++ //id 唯一标识
+  effect.allowRecurse = !!options.allowRecurse //是否允许递归（这个属性本意是用来控制侦听函数是否可以递归执行，但是实际发现并无卵用即使为true）
+  effect._isEffect = true //是侦听函数标识，如果有此属性表明已经是一个侦听函数了
+  effect.active = true //控制侦听函数的响应性，为false将失去响应性
+  effect.raw = fn //缓存 fn 源数据函数
+  effect.deps = [] //存储依赖dep。
+  effect.options = options //可配置选项
+  return effect//将创建好的侦听函数返回
 }
 
-// 清理依赖方法，遍历deps，并清空(因为deps中存储的effect为同时也是执行track()方法时收集进depsMap中的dep,因此此处清除也会移除掉depsMap中的
-//value)
+// 清除依赖，该方法会在侦听函数每次将要执行副作用函数前或触发stop()函数时调用，用来清除依赖的
 function cleanup(effect: ReactiveEffect) {
   const { deps } = effect
   if (deps.length) {
@@ -166,31 +177,39 @@ export function resetTracking() {
   const last = trackStack.pop()
   shouldTrack = last === undefined ? true : last
 }
-//执行依赖收集的方法,最终会将 当前激活态的effect 存入 targetMap 集合,这个过程被称为 "依赖收集"
-export function track(target: object, type: TrackOpTypes, key: unknown) {
-  //shouldTrack 开关关闭 或者 activeEffect 为 undefined 则直接return,说明无依赖项要被收集
+//依赖收集函数，当响应式数据属性被访问时该函数会被触发,从而收集有关访问属性的侦听函数（也叫依赖函数）effect
+//target:原始目标对象（代理对象所对应的原始对象），type: 操作类型，key：访问属性
+export function track(target: object, type: TrackOpTypes, key: unknown) { 
+  // 如果shouldTrack状态为false，或当前无激活态侦听函数触发，则不去收集依赖（说明没有可收集的依赖）
   if (!shouldTrack || activeEffect === undefined) {
     return
   }
-  //targetMap用来存放target响应式对象与dep依赖关系的集合
+  //targetMap 是一个WeakMap集合，也叫依赖映射表(容器)，以原始目标对象为 key，depsMap(是一个Map集合)为value进行存储
+  //depsMap中又以访问属性为 key，dep(是一个Set集合，自带去重功能)为value进行存储。dep集合中会存放 effect 侦听函数，
+  //这些侦听函数也可以被称为访问属性的依赖函数，当访问属性值发生变化时依赖函数就会被触发。
+
+  //获取依赖map
   let depsMap = targetMap.get(target)
-  //如果depsMap不存在,则以target为key,new Map()为value,创建一条target的依赖空记录(depsMap为空map集合)
+  //如果依赖map不存在,则去初始化一个
   if (!depsMap) {
-    targetMap.set(target, (depsMap = new Map())) // targetMap : [[target:Ref实例对象/proxy代理对象,depsMap:Map实例]]
+    targetMap.set(target, (depsMap = new Map()))
   }
-  //检索实例对象.key(也就是RefInstance.value) 是否被追踪过
-  //如果当前key在depsMap中未记录过,说明depsMap中未收集过关于此key的依赖关系,则创建一条当前key的空依赖记录
+  //依赖map中获取访问属性对应的依赖集合
   let dep = depsMap.get(key)
-  //没有则创建一条记录,set进targetMap(Ref中value作为key)
+  //如果不存在依赖集合，则去初始化一个
   if (!dep) {
-    depsMap.set(key, (dep = new Set())) //depsMap : [['value',[fn]: set]]
+    depsMap.set(key, (dep = new Set()))
   }
-  //dep是存放依赖函数effect的集合,先判断是否已存在此依赖,如果没有,则添加进来(依赖收集最核心地方)
+  //检测dep依赖集合中是否有当前激活态的侦听函数，如果没有则把它存进去（这个过程就叫依赖收集）
   if (!dep.has(activeEffect)) {
     dep.add(activeEffect)
-    //更新effect里的deps属性,将dep也放到effect.deps里，用于描述当前响应式对象的依赖
-    activeEffect.deps.push(dep) // deps: [[fn,...],...] fn: effect
-    //开发环境下，触发相应的钩子函数(调试钩子)
+    //activeEffect 其实是当前正在执行的激活态的 effect侦听函数，这一步将存储访问属性有关的所有依赖函数的dep集合push进
+    //当前侦听函数的deps（数组）中，建立了一个双向映射关系，这个双向映射关系会在每次副作用函数即将执行前的 cleanup操作时发挥作用
+    //会将先前收集进depsMap 里所有访问属性的dep集合中该侦听函数（依赖函数）移除掉。然后在执行副作用函数的时候再次执行进track函数时重新
+    //收集回来，这样的操作看似有点蛋疼，但经过细品后确实不是蛋疼所为，而是为了保证依赖的最新性。
+    activeEffect.deps.push(dep)
+    
+    //只有开发环境下，才去触发相应的钩子函数(调试钩子)
     if (__DEV__ && activeEffect.options.onTrack) {
       activeEffect.options.onTrack({
         effect: activeEffect,
@@ -211,7 +230,7 @@ export function trigger(
   oldValue?: unknown,
   oldTarget?: Map<unknown, unknown> | Set<unknown>
 ) {
- //获取原始对象的映射依赖 depsMap
+  //获取原始对象的映射依赖 depsMap
   const depsMap = targetMap.get(target)
   //如果不存在,说明不存在(未收集过)该原始对象的依赖,直接返回,也就不用去触发更新
   if (!depsMap) {
@@ -222,7 +241,7 @@ export function trigger(
   //初始化一个effects集合 (set集合)
   const effects = new Set<ReactiveEffect>()
   //add effect into effects
-//add是一个把每一个effect添加进effects集合的方法
+  //add是一个把每一个effect添加进effects集合的方法
   const add = (effectsToAdd: Set<ReactiveEffect> | undefined) => {
     if (effectsToAdd) {
       effectsToAdd.forEach(effect => {
@@ -232,7 +251,7 @@ export function trigger(
       })
     }
   }
-//如果是清除整个集合的数据，那就是集合每一项都会发生变化，所以,会将depsMap中的所有依赖项add进effects中
+  //如果是清除整个集合的数据，那就是集合每一项都会发生变化，所以,会将depsMap中的所有依赖项add进effects中
   if (type === TriggerOpTypes.CLEAR) {
     // collection being cleared
     // trigger all effects for target
@@ -243,10 +262,10 @@ export function trigger(
       if (key === 'length' || key >= (newValue as number)) {
         add(dep)
       }
-    })  
+    })
   } else {
     // schedule runs for SET | ADD | DELETE
-   //  SET | ADD | DELETE 三种操作都是操作响应式对象某一个属性，所以只需要通知依赖这一个属性的状态更新即可
+    //  SET | ADD | DELETE 三种操作都是操作响应式对象某一个属性，所以只需要通知依赖这一个属性的状态更新即可
     if (key !== void 0) {
       //void 0 = undefined
       add(depsMap.get(key))

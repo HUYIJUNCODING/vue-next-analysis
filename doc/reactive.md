@@ -324,7 +324,7 @@ createApp({
 </script>
 ```
 
-例如这里我们写个 push 方法的 demo ,然后浏览器打开，启动 debugger 调试，会发现先触发两次 get ,然后触发两次 set。虽然知道了结果，但是又引出一个问题，这个触发两次 get 然后再触发两次 set 是框架层面控制还是 Proxy 代理本身控制的，然后就又写了个比较单纯的 demo。
+例如这里我们写个 push 方法的 demo ,浏览器中打开，启动 debugger 调试，会发现先触发两次 get ,然后触发两次 set。虽然知道了结果，但是又引出一个问题，这个触发两次 get 然后再触发两次 set 是框架层面控制还是 Proxy 代理本身控制的，然后就又写了个比较单纯的 demo。
 
 ```js
 const p = new Proxy([1, 2, 3], {

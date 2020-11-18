@@ -5,11 +5,13 @@
 - 终于到了心心念已久的 `effect` 篇了，真可谓千呼万唤始出来，费了老大的劲。 此篇章主要分析三个部分 `createReactiveEffect` 如何创建侦听函数;
   `track` 如何收集侦听函数(依赖收集)； 以及 `trigger` 如何触发侦听函数执行依赖更新。这三部分是该篇的核心内容组成，只要弄清楚了，也就知道 `effect`是怎么回事了。
 
-### createReactiveEffect
+### 创建侦听函数
 
 首先从创建 `effect` 开始，不过我们需要结合两个外部调用函数作为入口点，这两个函数就是很脸熟的 `watchEffect`，`watch`。如果要问我为啥从它们开刀,而不是直接从 `effect` 函数开始，我想给你个眼神自己体会，哈哈哈（反正我挺笨的，直接看 effect 还是有很多点想不明白，需要前置引导哈）。奥对了，差点给忘记了，这两个方法在 `packages/vue/dist/vue.global.js` 中找，如果发现自己项目没有这个目录文件，那就 `npm run dev` 运行下项目。
 
 先找到这哥俩的位置
+
+#### watchEffect(watch)
 
 ```js
 // Simple effect.
@@ -38,6 +40,8 @@ function watch(source, cb, options) {
 - `watch` 的 `cb` 参数如果不是一个函数类型，会报警告，但是并不会报错，说明 `cb` 还可以是其他类型，但是一般写成函数比较好。
 
 然后我们去 `doWatch` 里面看看，貌似很长的样子（不要乱想哦），就分段看吧。
+
+#### doWatch
 
 ```js
 function doWatch(source, cb, { immediate, deep, flush, onTrack, onTrigger } = EMPTY_OBJ, instance = currentInstance) {
@@ -83,7 +87,7 @@ function doWatch(source, cb, { immediate, deep, flush, onTrack, onTrigger } = EM
       //如果数据源是一个响应式的对象，则getter是一个返回该响应式对象的函数
       else if (isReactive(source)) {
           getter = () => source;
-          deep = true;//深度监听开关
+          deep = true;//深度侦听开关
       }
       //如果数据源是一个数组，则getter是一个遍历数组每一项元素然后分别对每一项元素进行类型判断后将其执行结果作为新数组元素返回这个新数组的函数。
       //watch的侦听多个数据源模式的数据源就在这里执行，返回的新数组会传递给 cb（副作用函数）作为第一个参数
@@ -129,7 +133,7 @@ function doWatch(source, cb, { immediate, deep, flush, onTrack, onTrigger } = EM
            warnInvalidSource(source);
       }
       //如果 cb副作用函数存在，并且 deep 为真，说明是 执行 watch 函数并且此时的数据源为一个响应式对象类型，则对
-      //数据源的内部属性进行深度监听（会将对象类型的属性收集进一个set集合里面），gette函数是一个执行了属性深度监听和收集并返回这个响应式对象的函数
+      //数据源的内部属性进行深度侦听（会将对象类型的属性收集进一个set集合里面），gette函数是一个执行了属性深度侦听和收集并返回这个响应式对象的函数
        if (cb && deep) {
           const baseGetter = getter;
           getter = () => traverse(baseGetter());
@@ -146,7 +150,7 @@ function doWatch(source, cb, { immediate, deep, flush, onTrack, onTrigger } = EM
 - 如果数据源是一个数组，则 `getter`是一个遍历数组每一项元素然后分别对每一项元素进行类型判断后将其执行结果作为新数组元素然后返回这个新数组的函数（ watch 的侦听多个数据源模式的数据源就在这里执行，返回的新数组会传递给 cb（副作用函数）作为第一个参数）
 - 如果数据源是一个函数，会分 `cb` 是否存在两种情况初始化 `getter`，如果 `cb` 存在，是执行 `watch` 函数进来的，`getter` 就是一个返回最新依赖数据的函数；如果不存在说明是执行 `watchEffect` 进来的，此时的 `getter` 既是数据源函数，同时也是副作用函数。
 
-如果以上数据类型判断都不符合，那说明传入的数据源是一个无效的值，调用 warnInvalidSource 函数警告。接下来还有个判断，如果 `cb` 副作用函数存在，并且 `deep` 为真，说明是执行 `watch` 函数并且此时的数据源为一个响应式对象类型，则对数据源的内部属性进行深度监听（会将对象类型的属性收集进一个 `set` 集合里面），`getter` 函数是一个执行了属性深度监听和收集并返回这个响应式对象的函数。
+如果以上数据类型判断都不符合，那说明传入的数据源是一个无效的值，调用 warnInvalidSource 函数警告。接下来还有个判断，如果 `cb` 副作用函数存在，并且 `deep` 为真，说明是执行 `watch` 函数并且此时的数据源为一个响应式对象类型，则对数据源的内部属性进行深度侦听（会将对象类型的属性收集进一个 `set` 集合里面），`getter` 函数是一个执行了属性深度侦听和收集并返回这个响应式对象的函数。
 
 ```js
 function doWatch(
@@ -166,7 +170,7 @@ function doWatch(
   let oldValue = isArray(source) ? [] : INITIAL_WATCHER_VALUE
   //job 函数是一个执行副作用的任务函数
   const job = () => {
-    //runner就是监听函数,如果active属性为false说明已经停止侦听,就直接返回,不去执行副作用
+    //runner就是侦听函数,如果active属性为false说明已经停止侦听,就直接返回,不去执行副作用
     if (!runner.active) {
       return
     }
@@ -279,6 +283,203 @@ function doWatch(
   ...
 }
 ```
+
 最后一段了，下来是调用 `effect.ts` 文件中的 `effect` 方法去创建侦听函数，侦听函数创建好以后会被返回，这里用 `runner` 来接收，所以当执行 `runner` 函数时候就表示侦听器被触发了，此时此刻要么是初始化时的依赖收集，要么就是值变了引起的依赖更新，最后 `doWatch` 函数会返回一个可以用来显式停止侦听的函数。它内部通过调用 stop 方法，来解除侦听器中的所有依赖，从而达到解除侦听的效果。
 
-好了，到这里我们就算把 `doWatch` 函数内部的执行流程大致的分析完了，`doWatch` 内部其实就是一些围绕侦听器所做的初始化工作，但是我们还似乎还不清楚侦听函数的具体创建过程。所以趁热打铁，我们这就去`effect.ts` 里找 `effect` 方法，它就是去创建一个侦听函数的入口。
+好了，到这里我们就把 `doWatch` 函数内部的执行流程大致的分析完了，`doWatch` 内部其实就是一些围绕侦听器所做的初始化工作，但是我们似乎还不清楚侦听函数的具体创建过程。所以趁热打铁，这就去`effect.ts` 里找 `effect` 方法，它就是去创建一个侦听函数的入口。
+
+#### effect
+
+```js
+//判断传入的fn是否已经是一个侦听函数了,判断标识为_isEffect属性,如果不是,则没有该属性标识
+export function isEffect(fn: any): fn is ReactiveEffect {
+  return fn && fn._isEffect === true
+}
+
+//创建侦听函数的工厂函数effect
+export function effect<T = any>(
+  fn: () => T, //包装了源数据的原始函数
+  options: ReactiveEffectOptions = EMPTY_OBJ //配置项，可以是 { immediate, deep, flush, onTrack, onTrigger }
+): ReactiveEffect<T> {
+  //如果传入的 fn 源数据函数已经是一个侦听函数了(创建过了)那此时它内部会挂载有一个raw属性,用来缓存原函数体,
+  //当再次被传入时会自动获取到其内部的源函数,然后会使用源函数创建一个新的侦听函数，所以effect始终会返回一个新创建的侦听函数。
+  if (isEffect(fn)) {
+    fn = fn.raw
+  }
+  //执行创建的函数
+  const effect = createReactiveEffect(fn, options)
+  //lazy 是 options 选项的一个配置属性，如果 为true则会懒执行副作用，反之会在侦听函数创建完后立即执行一次副作用
+  //vue组件实例中，lazy属性默认是true（在vue.global.js中会看到）
+  if (!options.lazy) {
+    effect()
+  }
+  //返回侦听函数
+  return effect
+}
+```
+
+回到 `effect.ts` 文件来看下 `effect` 函数，首先会接收两个参数 `fn` 源数据函数和 `options` 配置选项，这两个参数都是我们手动传入的。
+然后会调用 `isEffect` 这个方法对 `fn` 进行判断看是否已经是一个 侦听函数了，如果是，则获取到它的源数据函数（保存在 raw 属性中）去执行创建，所以
+也说明 `effect` 始终会返回一个新创建的侦听函数。下来调用 `createReactiveEffect` 去执行创建，最后会将创建好的侦听函数返回。
+
+#### createReactiveEffect
+
+```js
+let uid = 0 //id 标识，应该是用来标识唯一性的，不用去细究
+
+//执行创建侦听函数
+function createReactiveEffect<T = any>(
+  fn: () => T, //源数据函数
+  options: ReactiveEffectOptions //配置项 可以是 { immediate, deep, flush, onTrack, onTrigger }
+): ReactiveEffect<T> {
+  //初始化一个侦听函数，函数本质也是对象，所以可以挂载/扩展一些有用的属性
+  const effect = function reactiveEffect(): unknown {
+    //active 是 effect 侦听函数上扩展的一个属性，默认 active 为true,表示一个有效的侦听函数，当侦听属性的值发生变化时就会去
+    //执行副作用，active 为false 的唯一时机是 stop方法触发，就是上面这个stop函数，此时，侦听函数就会失去侦听的能力，即响应性失效
+    if (!effect.active) {
+      //scheduler 是自定义调度器，用来调度触发侦听函数，会看到如果侦听函数失效后，如果自定了调度器，那么会直接返回undefined来终止
+      //程序继续进行，如果没有自定义调度器，则执行源数据函数，这时候因为依赖都被移除掉了，因此是不会触发依赖收集操作，相当于执行了一次普通的
+      //函数调用而已
+      return options.scheduler ? undefined : fn()
+    }
+    //这里进行一次effectStack 中是否有 effect 判断的目的是为了防止同一个侦听函数被连续触发多次引起死递归。
+    //假如此时正在执行副作用函数，该函数内部有修改依赖属性的操作，修改会触发 trigger， 进而
+    //会再次触发侦听函数执行，然后副作用函数执行，这样当前的副作用函数就会无限递归下去，因此为了避免此现象发生，就会在副作用
+    //函数执行之前进行先一次判断。如果当前侦听函数还没有出栈，就啥也不执行。
+    if (!effectStack.includes(effect)) {
+      //cleanup 函数的作用有两个，1：会移除掉依赖映射表(targetMap)里面的effect侦听器函数（也叫依赖函数），2：清空effect侦听函数中的deps
+      //会发现 cleanup 操作是在每次即将执行副作用函数之前执行的，也就是在每次依赖重新收集之前会清空之前的依赖。这样做的目的是为了保证
+      //依赖属性时刻对应最新的侦听函数。
+      cleanup(effect)
+      try {
+        //当前effect侦听函数 入栈,并激活设置为 activeEffect
+        enableTracking()
+        effectStack.push(effect)
+        activeEffect = effect
+        //fn为副作用函数,若该函数里的响应式对象有属性的访问操作,则会触发getter,getter里会调用track()方法,进而实现依赖的重新收集
+        return fn()
+      } finally {
+        //副作用函数执行完后,当前effect副作用函数出栈,并撤销激活态
+        effectStack.pop()
+        resetTracking()
+        activeEffect = effectStack[effectStack.length - 1]
+      }
+    }
+  } as ReactiveEffect
+  //函数也是对象类型,因此可以给effect侦听扩展一些有用的属性
+  effect.id = uid++ //id 唯一标识
+  effect.allowRecurse = !!options.allowRecurse //是否允许递归（这个属性本意是用来控制侦听函数是否可以递归执行，但是实际发现并无卵用即使为true）
+  effect._isEffect = true //是侦听函数标识，如果有此属性表明已经是一个侦听函数了
+  effect.active = true //控制侦听函数的响应性，为false将失去响应性
+  effect.raw = fn //缓存 fn 源数据函数
+  effect.deps = [] //存储依赖dep。
+  effect.options = options //可配置选项
+  return effect//将创建好的侦听函数返回
+}
+
+// 清除依赖，该方法会在侦听函数每次将要执行副作用函数前或触发stop()函数时调用，用来清除依赖的
+function cleanup(effect: ReactiveEffect) {
+  const { deps } = effect
+  if (deps.length) {
+    for (let i = 0; i < deps.length; i++) {
+      deps[i].delete(effect)
+    }
+    deps.length = 0
+  }
+}
+```
+
+`createReactiveEffect` 方法接收两个参数，这两个参数来自于 `effect` 函数传递过来就不解释了。首先内部会初始化一个 `reactiveEffect` 函数，这个函数就是侦听函数。因为函数本质也是对象类型，因此在其上挂载/扩展一些有用的属性（属性释义可以看注释），最后将创建好的侦听函数返回。这样一个侦听函数就被创建好了。如果是从 `vue.global.js` 过来的，这里的被返回出去的 `effect` 就会被 `runner` 接收保存起来。（侦听函数内部执行我们在下面触发的时候再回过头来分析下，这样可以保持一个逻辑的连贯性）。
+
+```js
+// vue.global.js
+ function doWatch(source, cb, { immediate, deep, flush, onTrack, onTrigger } = EMPTY_OBJ, instance = currentInstance) {
+   ...
+       //runner 保存的就是 reactiveEffect 方法返回的 effect侦听函数
+         const runner = effect(getter, {
+          lazy: true,
+          onTrack,
+          onTrigger,
+          scheduler
+      });
+      ...
+ }
+```
+
+### 依赖收集
+
+为了好说明，假设我们现在定义了这样的一个 `watchEffect` 和 `watch`。
+
+```js
+const count = ref(0)
+const state = reactive({ count: 0 })
+let dump, dump1
+
+watchEffect(() => {
+  dump = count.value
+})
+
+count.value = 1
+
+watch(
+  () => state.count,
+  (count, prevCount) => {
+    dump1 = count
+  }
+)
+
+state.count = 1
+```
+
+先是定义了两个响应式数据 `count`，`state`,然后定义两个变量 `dump`,`dump1`。再是两个侦听函数，先是侦听函数初始化，这个过程中默认会执行一次依赖收集，然后我们来修改响应式数据，这个修改动作会下发更新信号给侦听函数，侦听函数侦听到后去执行副作用函数从而实现依赖更新。看着分析是挺有道理的，
+但到底是不是这样的，我们还是来走下流程，窥探下执行细节比较稳妥。
+
+#### track
+
+当访问响应式数据时 `track` 函数会被触发，去执行一次依赖收集。
+
+```js
+//依赖收集函数，当响应式数据属性被访问时该函数会被触发,从而收集有关访问属性的侦听函数（也叫依赖函数）effect
+//target:原始目标对象（代理对象所对应的原始对象），type: 操作类型，key：访问属性
+export function track(target: object, type: TrackOpTypes, key: unknown) {
+  // 如果shouldTrack状态为false，或当前无激活态侦听函数触发，则不去收集依赖（说明没有可收集的依赖）
+  if (!shouldTrack || activeEffect === undefined) {
+    return
+  }
+  //targetMap 是一个WeakMap集合，也叫依赖映射表(容器)，以原始目标对象为 key，depsMap(是一个Map集合)为value进行存储
+  //depsMap中又以访问属性为 key，dep(是一个Set集合，自带去重功能)为value进行存储。dep集合中会存放 effect 侦听函数，
+  //这些侦听函数也可以被称为访问属性的依赖函数，当访问属性值发生变化时依赖函数就会被触发。
+
+  //获取依赖map
+  let depsMap = targetMap.get(target)
+  //如果依赖map不存在,则去初始化一个
+  if (!depsMap) {
+    targetMap.set(target, (depsMap = new Map()))
+  }
+  //依赖map中获取访问属性对应的依赖集合
+  let dep = depsMap.get(key)
+  //如果不存在依赖集合，则去初始化一个
+  if (!dep) {
+    depsMap.set(key, (dep = new Set()))
+  }
+  //检测dep依赖集合中是否有当前激活态的侦听函数，如果没有则把它存进去（这个过程就叫依赖收集）
+  if (!dep.has(activeEffect)) {
+    dep.add(activeEffect)
+    //activeEffect 其实是当前正在执行的激活态的 effect侦听函数，这一步将存储访问属性有关的所有依赖函数的dep集合push进
+    //当前侦听函数的deps（数组）中，建立了一个双向映射关系，这个双向映射关系会在每次副作用函数即将执行前的 cleanup操作时发挥作用
+    //会将先前收集进depsMap 里所有访问属性的dep集合中该侦听函数（依赖函数）移除掉。然后在执行副作用函数的时候再次执行进track函数时重新
+    //收集回来，这样的操作看似有点蛋疼，但经过细品后确实不是蛋疼所为，而是为了保证依赖的最新性。
+    activeEffect.deps.push(dep)
+
+    //只有开发环境下，才去触发相应的钩子函数(调试钩子)
+    if (__DEV__ && activeEffect.options.onTrack) {
+      activeEffect.options.onTrack({
+        effect: activeEffect,
+        target,
+        type,
+        key
+      })
+    }
+  }
+}
+```

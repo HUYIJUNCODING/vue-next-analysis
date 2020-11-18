@@ -12,23 +12,23 @@ const { ref,createApp, reactive, computed, watchEffect,watch, onMounted, onUnmou
 createApp({
   setup () {
     const count = ref(0);
-    const map = reactive(new Map([[{'cx':'cc'},{'a1':11}],['b',2]]))
     const state = reactive({ count: 0 })
-    
+    let dump,dump1;
+
     watchEffect(()=> {
-      let dump = count.value
-    },{
-      flush: 'sync'
+      dump = count.value
     })
+
     count.value = 1;
-    // watch(
-    //   () => state.count,
-    //   (count, prevCount) => {
-    //     /* ... */
-    //     console.log(prevCount,count)
-    //   }
-    // )
-    // state.count = 1;
+
+    watch(
+      () => state.count,
+      (count, prevCount) => {
+        dump1 = count;
+      }
+    )
+
+    state.count = 1;
     // onMounted(() => {})
     return {
       count,
