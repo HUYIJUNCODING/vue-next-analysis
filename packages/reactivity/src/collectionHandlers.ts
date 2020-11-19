@@ -228,7 +228,7 @@ interface IterationResult {
 
 //创建迭代方法
 function createIterableMethod(
-  method: string | symbol, //方法名
+  method: string | symbol, //方法名 ['keys', 'values', 'entries', Symbol.iterator]
   isReadonly: boolean,
   isShallow: boolean
 ) {
@@ -239,7 +239,7 @@ function createIterableMethod(
     const target = (this as any)[ReactiveFlags.RAW]
     const rawTarget = toRaw(target)
     const targetIsMap = isMap(rawTarget)
-    // 如果是entries方法，或者是map的迭代方法的话，isPair为true
+    // 如果是 entries方法，或者是目标对象为Map集合，Symbol.iterator（只要含有此迭代属性的迭代器，比如 for...of），isPair为true
     // 这种情况下，迭代器方法返回的是一个[key, value]的结构
     const isPair =
       method === 'entries' || (method === Symbol.iterator && targetIsMap)
@@ -248,7 +248,7 @@ function createIterableMethod(
     const innerIterator = target[method](...args)
     // 获取不同模式下的响应式转化方法
     const wrap = isReadonly ? toReadonly : isShallow ? toShallow : toReactive
-    //非只读模式下，依赖收集
+    //非只读模式下，收集迭代器相关的依赖
     !isReadonly &&
       track(
         rawTarget,

@@ -12,23 +12,23 @@ const { ref,createApp, reactive, computed, watchEffect,watch, onMounted, onUnmou
 createApp({
   setup () {
     const count = ref(0);
-    const state = reactive({ count: 0 })
+    const state = reactive([1,2,3,4])
     let dump,dump1;
 
-    watchEffect(()=> {
-      dump = count.value
-    })
+    // watchEffect(()=> {
+    //   dump = count.value
+    // })
 
-    count.value = 1;
+    // count.value = 1;
 
-    watch(
-      () => state.count,
-      (count, prevCount) => {
-        dump1 = count;
-      }
-    )
-
-    state.count = 1;
+    // watch(
+    //   () => state.count,
+    //   (count, prevCount) => {
+    //     dump1 = count;
+    //   }
+    // )
+      state[0] = 5;
+    // state.count = 1;
     // onMounted(() => {})
     return {
       count,

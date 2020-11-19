@@ -436,11 +436,11 @@ state.count = 1
 
 #### track
 
-当访问响应式数据时 `track` 函数会被触发，去执行一次依赖收集。
+当访问响应式数据时 `track` 方法会被触发，去执行一次依赖收集。
 
 ```js
 //依赖收集函数，当响应式数据属性被访问时该函数会被触发,从而收集有关访问属性的侦听函数（也叫依赖函数）effect
-//target:原始目标对象（代理对象所对应的原始对象），type: 操作类型，key：访问属性
+//target:原始目标对象（代理对象所对应的原始对象），type: 操作类型，key：访问属性名
 export function track(target: object, type: TrackOpTypes, key: unknown) {
   // 如果shouldTrack状态为false，或当前无激活态侦听函数触发，则不去收集依赖（说明没有可收集的依赖）
   if (!shouldTrack || activeEffect === undefined) {
@@ -483,3 +483,156 @@ export function track(target: object, type: TrackOpTypes, key: unknown) {
   }
 }
 ```
+
+`track` 方法接收三个参数 target:原始目标对象（代理对象所对应的原始对象），type: 操作类型，key：访问属性名。方法内首先会进行一次依赖可收集判断，如果 shouldTrack 开关状态为 false，或当前无激活态侦听函数触发，则不去收集依赖（说明没有可收集的依赖）。下来是一系列关于依赖映射表（容器）存储内容存在性判断和创建存储过程，最终会生成这样一个映射表结构：
+
+```js
+WeakMap<Target, Map<string | symbol, Set<ReactiveEffect>>>
+
+[[target1,[[key1,[effect1,effect2,...],[key2,[effect1,effect2,...],...]]],[target2,[[key1,[effect1,effect2,...],[key2,[effect1,effect2,...],...]]],...]
+```
+
+看起来可能不是很直观，那就描述下吧：首先会创建一个 `WeakMap` 类型的依赖收集容器 `targetMap`，这个容器是个顶级容器，所有依赖相关的东西都会安排进它里面。然后 `targetMap` 里面又会以不同 `target` 原始目标对象为 `key` ,`depsMap`（Map 集合）为 value 将收集容器进行区间划分。`dempsMap`中又会以传入的访问属性名为 `key` ,`dep`（Set 集合，自带去重功能）为 `value` 再次对 `dempsMap` 进行区间划分，最后将当前设置为激活态的 `effect`侦听函数（依赖函数）存入 `dep`集合中。这样不同目标对象下不同访问属性的所有依赖函数就被收集完成了，你看被安排的明明白白！。
+然后说一个小细节`activeEffect.deps.push(dep)` ，会发现最后也会将 dep 往每一个 effect 的 deps 数组中 存入一份，这个操作有啥作用呢？
+不卖关子了，就直接说了，其实这一步目的是在每一个侦听函数和依赖映射表间建立了一个双向映射关系，这个双向映射关系会在每次副作用函数即将执行前的 `cleanup` 操作发挥作用。会将先前收集进 `depsMap` 里所有访问属性的 `dep` 集合中该侦听函数（依赖函数）移除掉。然后在执行副作用函数的时候再次执行 `track` 时重新收集回来，这样的操作看似有点蛋疼，但经过细品后的确不是蛋疼行为，这是为了保证依赖的最新性而有意为之。
+
+#### trigger
+
+分析完了依赖收集后，下来就是触发依赖更新了，我们来看下执行过程, `trigger` 方法有点略长，哈哈哈。
+
+```js
+//触发依赖更新函数
+export function trigger(
+  target: object, //原始目标对象（代理对象所对应的原始对象）
+  type: TriggerOpTypes, //操作类型
+  key?: unknown, //要修改/设置的属性名
+  newValue?: unknown, //新属性值
+  oldValue?: unknown, //旧属性值
+  oldTarget?: Map<unknown, unknown> | Set<unknown> //貌似只会在开发模式的调试下用到，不用去管
+) {
+  //获取目标对象在依赖映射表中对应的映射集合depsMap
+  const depsMap = targetMap.get(target)
+  //如果depsMap不存在,说明未收集过有关该原始对象的属性依赖,直接返回,不用去触发依赖更新
+  if (!depsMap) {
+    // never been tracked
+    return
+  }
+
+  //初始化一个effects集合 (set集合)用来存放要被执行的侦听函数（依赖函数）
+  const effects = new Set<ReactiveEffect>()
+  //add effect into effects
+  //add 是将 effect 侦听函数 添加进 effects 集合的添加方法
+  const add = (effectsToAdd: Set<ReactiveEffect> | undefined) => {
+    //effectsToAdd 其实就是从depsMap中执行属性对应的dep集合，里面存放的是一个个effect侦听函数
+    if (effectsToAdd) {
+      //执行遍历添加
+      effectsToAdd.forEach(effect => {
+        //添加条件： 要添加的侦听函数需要是一个非激活态，或者 allowRecurse 配置属性为true,才可以添加
+        //但是单测实例时发现 allowRecurse 属性无论是 true or false 侦听函数effect都不会发生递归，因此
+        //我感觉这个属性是多余的。
+        if (effect !== activeEffect || effect.allowRecurse) {
+          effects.add(effect)
+        }
+      })
+    }
+  }
+  //如果操作类型为 clear,则将传入属性相关的所有依赖函数都触发，因为清空操作会清空整个集合，所以每一个集合属性的依赖都有影响
+  if (type === TriggerOpTypes.CLEAR) {
+    // collection being cleared
+    // trigger all effects for target
+    depsMap.forEach(add)
+    //如果是修改数组长度操作,则将depsMap中有关 length 对应的依赖项以及数组中索引不大于新数组长度的下标对应的依赖添加 进effects中
+    //因为数组长度变了，数组原来所有不大于新长度的索引对应的元素都会被重新设置一次，因此会触发依赖更新
+  } else if (key === 'length' && isArray(target)) {
+    depsMap.forEach((dep, key) => {
+      if (key === 'length' || key >= (newValue as number)) {
+        add(dep)
+      }
+    })
+  } else {
+    // schedule runs for SET | ADD | DELETE
+    //如果能进else说明肯定是SET | ADD | DELETE 中的某一种操作，若key不为 undefined，说明key是一个有效的属性，则获取该属性对应的所有依赖函数
+    //添加进 effects 集合
+    if (key !== void 0) {
+      //void 0 = undefined
+      add(depsMap.get(key))
+    }
+
+    // also run for iteration key on ADD | DELETE | Map.SET
+    //这里先回顾下什么情况下会收集  ITERATE_KEY 和 MAP_KEY_ITERATE_KEY 为 key 的依赖，
+    //1. baseHandlers.ts -> ownKeys 捕获方法中，这个方法被触发的时机是监听到Object.keys()被调用。
+    //2. collectionHandlers.ts -> 插装方法 size，迭代方法 ['keys', 'values', 'entries',forEach, Symbol.iterator]中。获取集合长度.size 时触发 size方法，调用 Map,Set集合的迭代方法（keys,values,entries,forEach,for...of 等）。
+    //ADD 表示新增属性操作，DELETE 表示删除属性操作 ，SET 表示修改属性操作。不同的操作类型下会根据目标对象的类型不同去触发更新对应的迭代依赖
+    //这些迭代依赖之所以要去更新，是因为当前的操作会对收集的依赖有影响，如果不去更新，那就不能保证依赖数据的最新。
+    switch (type) {
+      //新增属性操作
+      case TriggerOpTypes.ADD:
+        if (!isArray(target)) {
+          add(depsMap.get(ITERATE_KEY))
+          if (isMap(target)) {
+            add(depsMap.get(MAP_KEY_ITERATE_KEY))
+          }
+        } else if (isIntegerKey(key)) {
+          // new index added to array -> length changes
+          add(depsMap.get('length'))
+        }
+        break
+      //删除属性操作
+      case TriggerOpTypes.DELETE:
+        if (!isArray(target)) {
+          add(depsMap.get(ITERATE_KEY))
+          if (isMap(target)) {
+            add(depsMap.get(MAP_KEY_ITERATE_KEY))
+          }
+        }
+        break
+      //修改属性操作
+      case TriggerOpTypes.SET:
+        if (isMap(target)) {
+          add(depsMap.get(ITERATE_KEY))
+        }
+        break
+    }
+  }
+
+  //更新依赖函数的执行方法
+  const run = (effect: ReactiveEffect) => {
+    //开发模式下的调试钩子函数
+    if (__DEV__ && effect.options.onTrigger) {
+      effect.options.onTrigger({
+        effect,
+        target,
+        key,
+        type,
+        newValue,
+        oldValue,
+        oldTarget
+      })
+    }
+    //如果侦听函数的options配置选项上挂载了 scheduler 调度器，则使用调度器去执行侦听函数，否则直接执行侦听函数
+    if (effect.options.scheduler) {
+      effect.options.scheduler(effect)
+    } else {
+      effect()
+    }
+  }
+  //遍历effects集合，执行侦听函数的更新。
+  effects.forEach(run)
+}
+```
+`trigger` 方法内部首先从依赖映射表 `targetMap` 中获取到当前原始目标对象下的 `depsMap` 依赖集合，如果 `depsMap` 不存在,说明未收集过有关该原始对象的属性依赖,直接返回,不用去触发依赖更新。
+然后往下走，会初始化一个 `effects` 集合 (set集合,自带去重功能)用来存放要被执行的侦听函数（依赖函数），这里为啥用 `set` 集合呢，因为 `set` 集合自带去重功能，有可能出现添加进的依赖函数重复现象，那用 `set` 就可以自动过滤掉。
+下来定义了一个 `add` 函数，这个函数的作用就是将 `effect` 侦听函数添加进 `effects` 集合的。这里关于 add 方法内部有一个细节，就是侦听函数的添加条件：`侦听函数需要是一个非激活态，或者 allowRecurse 配置属性为true`。但是单测实例时发现 `allowRecurse` 属性无论是 `true` or `false` 侦听函数 `effect` 都不会发生递归，为啥这个属性不生效呢，往回翻来看下 `effect` 函数有这莫一段代码 。
+
+```js
+  const effect = function reactiveEffect(): unknown {
+    ....
+        if (!effectStack.includes(effect)) {...}
+    ...
+  }
+
+```
+
+即使此时 将等于 `activeEffect`的 `effect` 添加进了 `effects` 集合中，然后到了执行该侦听函数这一步，也会被上面这个 if 条件拦住，所以个人感觉 `allowRecurse` 这个属性是多余的。那此时也衍生出两个个问题，什么时候 `effect` 等于 `activeEffect` ？如果不加 if 判断拦截，结果如何？这两个问题先不急，等下面分析到 effect 函数执行的时候就明白了。
+
+下来是一系列对传入的 `type` 操作类型的判断

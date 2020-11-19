@@ -115,9 +115,9 @@ function createReactiveEffect<T = any>(
       return options.scheduler ? undefined : fn()
     }
     //这里进行一次effectStack 中是否有 effect 判断的目的是为了防止同一个侦听函数被连续触发多次引起死递归。
-    //假如此时正在执行副作用函数，该函数内部有修改依赖属性的操作，修改会触发 trigger， 进而
-    //会再次触发侦听函数执行，然后副作用函数执行，这样当前的副作用函数就会无限递归下去，因此为了避免此现象发生，就会在副作用
-    //函数执行之前进行先一次判断。如果当前侦听函数还没有出栈，就啥也不执行。
+    //假如此时正在执行副作用函数，该函数内部有修改依赖属性的操作，修改会触发 trigger， 进而会再次触发侦听函数执行，
+    //然后副作用函数执行，这样当前的副作用函数就会无限递归下去，因此为了避免此现象发生，就会在副作用函数执行之前进行先一次判断。
+    //如果当前侦听函数还没有出栈，就啥也不执行。
     if (!effectStack.includes(effect)) {
       //cleanup 函数的作用有两个，1：会移除掉依赖映射表(targetMap)里面的effect侦听器函数（也叫依赖函数），2：清空effect侦听函数中的deps
       //会发现 cleanup 操作是在每次即将执行副作用函数之前执行的，也就是在每次依赖重新收集之前会清空之前的依赖。这样做的目的是为了保证
@@ -146,7 +146,7 @@ function createReactiveEffect<T = any>(
   effect.raw = fn //缓存 fn 源数据函数
   effect.deps = [] //存储依赖dep。
   effect.options = options //可配置选项
-  return effect//将创建好的侦听函数返回
+  return effect //将创建好的侦听函数返回
 }
 
 // 清除依赖，该方法会在侦听函数每次将要执行副作用函数前或触发stop()函数时调用，用来清除依赖的
@@ -178,8 +178,8 @@ export function resetTracking() {
   shouldTrack = last === undefined ? true : last
 }
 //依赖收集函数，当响应式数据属性被访问时该函数会被触发,从而收集有关访问属性的侦听函数（也叫依赖函数）effect
-//target:原始目标对象（代理对象所对应的原始对象），type: 操作类型，key：访问属性
-export function track(target: object, type: TrackOpTypes, key: unknown) { 
+//target:原始目标对象（代理对象所对应的原始对象），type: 操作类型，key：访问属性名
+export function track(target: object, type: TrackOpTypes, key: unknown) {
   // 如果shouldTrack状态为false，或当前无激活态侦听函数触发，则不去收集依赖（说明没有可收集的依赖）
   if (!shouldTrack || activeEffect === undefined) {
     return
@@ -208,7 +208,7 @@ export function track(target: object, type: TrackOpTypes, key: unknown) {
     //会将先前收集进depsMap 里所有访问属性的dep集合中该侦听函数（依赖函数）移除掉。然后在执行副作用函数的时候再次执行进track函数时重新
     //收集回来，这样的操作看似有点蛋疼，但经过细品后确实不是蛋疼所为，而是为了保证依赖的最新性。
     activeEffect.deps.push(dep)
-    
+
     //只有开发环境下，才去触发相应的钩子函数(调试钩子)
     if (__DEV__ && activeEffect.options.onTrack) {
       activeEffect.options.onTrack({
@@ -221,42 +221,48 @@ export function track(target: object, type: TrackOpTypes, key: unknown) {
   }
 }
 
-//触发依赖更新的方法(当响应式数据更新,会遍历执行先前收集进depsMap中的副作用函数,重新收集依赖关系,并将最新值同步给依赖属性)
+//触发依赖更新函数
 export function trigger(
-  target: object,
-  type: TriggerOpTypes,
-  key?: unknown,
-  newValue?: unknown,
-  oldValue?: unknown,
-  oldTarget?: Map<unknown, unknown> | Set<unknown>
+  target: object, //原始目标对象（代理对象所对应的原始对象）
+  type: TriggerOpTypes, //操作类型
+  key?: unknown, //要修改/设置的属性名
+  newValue?: unknown, //新属性值
+  oldValue?: unknown, //旧属性值
+  oldTarget?: Map<unknown, unknown> | Set<unknown> //貌似只会在开发模式的调试下用到，不用去管
 ) {
-  //获取原始对象的映射依赖 depsMap
+  //获取目标对象在依赖映射表中对应的映射集合depsMap
   const depsMap = targetMap.get(target)
-  //如果不存在,说明不存在(未收集过)该原始对象的依赖,直接返回,也就不用去触发更新
+  //如果depsMap不存在,说明未收集过有关该原始对象的属性依赖,直接返回,不用去触发依赖更新
   if (!depsMap) {
     // never been tracked
     return
   }
 
-  //初始化一个effects集合 (set集合)
+  //初始化一个effects集合 (set集合)用来存放要被执行的侦听函数（依赖函数）
   const effects = new Set<ReactiveEffect>()
   //add effect into effects
-  //add是一个把每一个effect添加进effects集合的方法
+  //add 是将 effect 侦听函数 添加进 effects 集合的添加方法
   const add = (effectsToAdd: Set<ReactiveEffect> | undefined) => {
+    //effectsToAdd 其实就是从depsMap中执行属性对应的dep集合，里面存放的是一个个effect侦听函数
     if (effectsToAdd) {
+      //执行遍历添加
       effectsToAdd.forEach(effect => {
+        //添加条件： 要添加的侦听函数需要是一个非激活态，或者 allowRecurse 配置属性为true,才可以添加
+        //但是单测实例时发现 allowRecurse 属性无论是 true or false 侦听函数effect都不会发生递归，因此
+        //我感觉这个属性是多余的。
         if (effect !== activeEffect || effect.allowRecurse) {
           effects.add(effect)
         }
       })
     }
   }
-  //如果是清除整个集合的数据，那就是集合每一项都会发生变化，所以,会将depsMap中的所有依赖项add进effects中
+  //如果操作类型为 clear,则将传入属性相关的所有依赖函数都触发，因为清空操作会清空整个集合，所以每一个集合属性的依赖都有影响
   if (type === TriggerOpTypes.CLEAR) {
     // collection being cleared
     // trigger all effects for target
     depsMap.forEach(add)
-    //如果是修改数组长度操作,则将depsMap中length 对应的依赖项以及不大于新数组长度的下标对应的依赖add进effects中,进而去更新依赖
+    //如果是修改数组长度操作,则将depsMap中有关 length 对应的依赖项以及数组中索引不大于新数组长度的下标对应的依赖添加 进effects中
+    //因为数组长度变了，数组原来所有不大于新长度的索引对应的元素都会被重新设置一次，因此会触发依赖更新
   } else if (key === 'length' && isArray(target)) {
     depsMap.forEach((dep, key) => {
       if (key === 'length' || key >= (newValue as number)) {
@@ -265,17 +271,21 @@ export function trigger(
     })
   } else {
     // schedule runs for SET | ADD | DELETE
-    //  SET | ADD | DELETE 三种操作都是操作响应式对象某一个属性，所以只需要通知依赖这一个属性的状态更新即可
+    //如果能进else说明肯定是SET | ADD | DELETE 中的某一种操作，若key不为 undefined，说明key是一个有效的属性，则获取该属性对应的所有依赖函数
+    //添加进 effects 集合
     if (key !== void 0) {
       //void 0 = undefined
       add(depsMap.get(key))
     }
 
     // also run for iteration key on ADD | DELETE | Map.SET
-    //对于Set集合,数组的 添加,删除元素的方法以及 Map集合的添加元素方法执行的时候并不是通过触发元素的下标或者key来更新依赖的,依赖收集的时候(track),
-    //对于数组劫持的是 'length'属性,set和map分别是 ITERATE_KEY 和 MAP_KEY_ITERATE_KEY,因此这里通过分情况分别获取 length,ITERATE_KEY,MAP_KEY_ITERATE_KEY
-    //对应的依赖 add进effects,然后去触发各依赖更新
+    //这里先回顾下什么情况下会收集  ITERATE_KEY 和 MAP_KEY_ITERATE_KEY 为 key 的依赖，
+    //1. baseHandlers.ts -> ownKeys 捕获方法中，这个方法被触发的时机是监听到Object.keys()被调用。
+    //2. collectionHandlers.ts -> 插装方法 size，迭代方法 ['keys', 'values', 'entries',forEach, Symbol.iterator]中。获取集合长度.size 时触发 size方法，调用 Map,Set集合的迭代方法（keys,values,entries,forEach,for...of 等）。
+    //ADD 表示新增属性操作，DELETE 表示删除属性操作 ，SET 表示修改属性操作。不同的操作类型下会根据目标对象的类型不同去触发更新对应的迭代依赖
+    //这些迭代依赖之所以要去更新，是因为当前的操作会对收集的依赖有影响，如果不去更新，那就不能保证依赖数据的最新。
     switch (type) {
+      //新增属性操作
       case TriggerOpTypes.ADD:
         if (!isArray(target)) {
           add(depsMap.get(ITERATE_KEY))
@@ -287,6 +297,7 @@ export function trigger(
           add(depsMap.get('length'))
         }
         break
+      //删除属性操作
       case TriggerOpTypes.DELETE:
         if (!isArray(target)) {
           add(depsMap.get(ITERATE_KEY))
@@ -295,6 +306,7 @@ export function trigger(
           }
         }
         break
+      //修改属性操作
       case TriggerOpTypes.SET:
         if (isMap(target)) {
           add(depsMap.get(ITERATE_KEY))
@@ -303,8 +315,9 @@ export function trigger(
     }
   }
 
-  //执行effect的 forEach回调函数
+  //更新依赖函数的执行方法
   const run = (effect: ReactiveEffect) => {
+    //开发模式下的调试钩子函数
     if (__DEV__ && effect.options.onTrigger) {
       effect.options.onTrigger({
         effect,
@@ -316,12 +329,13 @@ export function trigger(
         oldTarget
       })
     }
+    //如果侦听函数的options配置选项上挂载了 scheduler 调度器，则使用调度器去执行侦听函数，否则直接执行侦听函数
     if (effect.options.scheduler) {
       effect.options.scheduler(effect)
     } else {
       effect()
     }
   }
-  //迭代触发effects 中的effect
+  //遍历effects集合，执行侦听函数的更新。
   effects.forEach(run)
 }
