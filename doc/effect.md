@@ -5,6 +5,8 @@
 - 终于到了心心念已久的 `effect` 篇了，真可谓千呼万唤始出来，费了老大的劲。 此篇章主要分析三个部分 `createReactiveEffect` 如何创建侦听函数;
   `track` 如何收集侦听函数(依赖收集)； 以及 `trigger` 如何触发侦听函数执行依赖更新。这三部分是该篇的核心内容组成，只要弄清楚了，也就知道 `effect`是怎么回事了。
 
+* [effect 篇源代码传送门](https://github.com/HUYIJUNCODING/vue-next-analysis/blob/master/packages/reactivity/src/effect.ts)
+
 ### 创建侦听函数
 
 首先从创建 `effect` 开始，不过我们需要结合两个外部调用函数作为入口点，这两个函数就是很脸熟的 `watchEffect`，`watch`。如果要问我为啥从它们开刀,而不是直接从 `effect` 函数开始，我想给你个眼神自己体会，哈哈哈（反正我挺笨的，直接看 effect 还是有很多点想不明白，需要前置引导哈）。奥对了，差点给忘记了，这两个方法在 `packages/vue/dist/vue.global.js` 中找，如果发现自己项目没有这个目录文件，那就 `npm run dev` 运行下项目。
@@ -684,14 +686,15 @@ switch (type) {
 如果你仔细分析这里每种类型 case 下的判断条件会发现不同类型的操作都会对其下的依赖产生影响。我们来举个例子吧；
 
 ```js
-const state = reactive({ a: 1, b: 2})
-let keys;
+const state = reactive({ a: 1, b: 2 })
+let keys
 watchEffect(() => {
- keys = Object.keys(state)
+  keys = Object.keys(state)
 })
 
-state.c = 3;
+state.c = 3
 ```
+
 我们先定义了一个响应式对象 `state` 然后在 `watchEffect` 的副作用函数中执行 `Object.keys(state)`。 首先副作用函数会执行一次，执行过程中由于 `Object.keys` 调用会触发 `ownKeys` 捕获方法。`ownKeys` 方法内又会触发 `track` ，从而进行依赖收集，这里分为两种情况，数组和对象，如果是数组，
 会将 `length` 作为 `key` ,如果是对象则用 `ITERATE_KEY` 常量作为 `key`，将它们依赖关系存入 `depsMap` 集合中，我们称之为迭代依赖关系。
 
@@ -701,17 +704,15 @@ function ownKeys(target: object): (string | number | symbol)[] {
   track(target, TrackOpTypes.ITERATE, isArray(target) ? 'length' : ITERATE_KEY)
   return Reflect.ownKeys(target)
 }
-
 ```
 
 然后我们新添加一个属性 `c`, 属性值为 3，新增属性就会触发 `trigger` ，进而代码一定会执行到我们刚才说的 type 类型判断哪里，这个时候 type 的类型是 `ADD`。刚才我们说过了，`ITERATE_KEY` 的依赖是又 `Object.keys` 方法引起收集的，那添加了新属性，是不是得重新执行下包含有 `Object.keys` 逻辑的依赖函数，进而更新 `keys` 变量的值， 不然 `keys` 变量中保存的 key 就不是最新的了。
 同样对于数组如果通过 `push` 方法或者设置索引的方式给数组新增元素，那也会引起 `length` 下的依赖更新。还有集合类型，我们就不一一举例子了，道理都是一样的。
 
-
-`trigger` 方法的最后定义了一个用来更新依赖的执行方法  `run `，然后就紧接着去遍历 `effects` 集合，执行侦听函数的更新。这样 `trigger`就分析完了。但是我们的分析还没有完，下来伴随着执行，我们将执行过程再看看。
+`trigger` 方法的最后定义了一个用来更新依赖的执行方法 `run`，然后就紧接着去遍历 `effects` 集合，执行侦听函数的更新。这样 `trigger`就分析完了。但是我们的分析还没有完，下来伴随着执行，我们将执行过程再看看。
 
 开始遍历 `effects` ，然后依次拿到事先存好的 `effect` 侦听函数，放进 `run` 方法中执行，会看到 `run` 方法入参接收的就会 `effect`。
-`run` 方法中第一个 if 判断不用管，是开发模式下的一个关于调试的。我们直接看 第二个 if ，这个 if 判断意思是说侦听函数的 `options` 配置选项上如果挂载了 `scheduler` 调度器，则使用调度器去执行侦听函数，否则直接执行侦听函数。之前在 `vue.global.js` 中分析过，会给 `options` 上挂载一个  `scheduler`，你看，这里就是使用的地方，那我们就辗转到 `scheduler` 中去。
+`run` 方法中第一个 if 判断不用管，是开发模式下的一个关于调试的。我们直接看 第二个 if ，这个 if 判断意思是说侦听函数的 `options` 配置选项上如果挂载了 `scheduler` 调度器，则使用调度器去执行侦听函数，否则直接执行侦听函数。之前在 `vue.global.js` 中分析过，会给 `options` 上挂载一个 `scheduler`，你看，这里就是使用的地方，那我们就辗转到 `scheduler` 中去。
 
 ```js
 function doWatch(
@@ -742,80 +743,78 @@ if (flush === 'sync') {
 ...
 }
 ```
+
 将代码再次 `bia` 出来，加深下印象。我们就用默认模式（pre）分析吧（其实都差不多，只是执行的时机不同罢了）。这里如果是组件已经渲染完成后触发的，
-那莫会走 if 逻辑，如果是在组件挂载之前（比如setup），就走 else 逻辑，为了简单明了，我们就 else吧。会发现又去调用 job。我们依然把 job 也再次 `bia` 出来。
+那莫会走 if 逻辑，如果是在组件挂载之前（比如 setup），就走 else 逻辑，为了简单明了，我们就 else 吧。会发现又去调用 job。我们依然把 job 也再次 `bia` 出来。
 
 ```js
-  const job = () => {
-    //runner就是侦听函数,如果active属性为false说明已经停止侦听,就直接返回,不去执行副作用
-    if (!runner.active) {
-      return
-    }
-    //cb是 watch 方法中的 副作用函数,如果存在就去执行它(副作用),如果不存在,说明是 watchEffect,则去执行runner函数,也就是effect自身
-    if (cb) {
-      // watch(source, cb)
-      const newValue = runner()
-      if (deep || forceTrigger || hasChanged(newValue, oldValue)) {
-        // cleanup before running cb again
-        if (cleanup) {
-          cleanup()
-        }
-        callWithAsyncErrorHandling(cb, instance, 3 /* WATCH_CALLBACK */, [
-          newValue,
-          // pass undefined as the old value when it's changed for the first time
-          oldValue === INITIAL_WATCHER_VALUE ? undefined : oldValue,
-          onInvalidate
-        ])
-        oldValue = newValue
-      }
-    } else {
-      // watchEffect
-      runner() //就是执行 `effect.ts` 中的 effect()
-    }
+const job = () => {
+  //runner就是侦听函数,如果active属性为false说明已经停止侦听,就直接返回,不去执行副作用
+  if (!runner.active) {
+    return
   }
-
+  //cb是 watch 方法中的 副作用函数,如果存在就去执行它(副作用),如果不存在,说明是 watchEffect,则去执行runner函数,也就是effect自身
+  if (cb) {
+    // watch(source, cb)
+    const newValue = runner()
+    if (deep || forceTrigger || hasChanged(newValue, oldValue)) {
+      // cleanup before running cb again
+      if (cleanup) {
+        cleanup()
+      }
+      callWithAsyncErrorHandling(cb, instance, 3 /* WATCH_CALLBACK */, [
+        newValue,
+        // pass undefined as the old value when it's changed for the first time
+        oldValue === INITIAL_WATCHER_VALUE ? undefined : oldValue,
+        onInvalidate
+      ])
+      oldValue = newValue
+    }
+  } else {
+    // watchEffect
+    runner() //就是执行 `effect.ts` 中的 effect()
+  }
+}
 ```
+
 job 内部分两种情况，有 cb 和没有 cb，这里之前也讲过了，其实就是 `watch` 和 `watchEffect` 的区别。如果是 `watch` 会走 if 判断，调用 `runner` （侦听函数）返回执行了原始函数返回的新属性值（这个过程中会收集新的依赖），`cleanup` 方法用来清除上次副作用函数执行后留下的还在生效的副作用。下来 调用 `callWithAsyncErrorHandling` 方法，执行副作用函数。
 否则就是 `watchEffect` ，走 `else` 逻辑，`watch` 下我们没有分析 `effect` 侦听函数内部具体执行过程，一笔代过了，其实我是想放到这说呢，不要问我为毛，就是乐意，哈哈哈，那走吧，我们又回到 `effect.ts` 里去。
 
 > 找啊找啊找朋友，找到一个好朋友。。。
 
 ```js
-  //初始化一个侦听函数，函数本质也是对象，所以可以挂载/扩展一些有用的属性
-  const effect = function reactiveEffect(): unknown {
-    //active 是 effect 侦听函数上扩展的一个属性，默认 active 为true,表示一个有效的侦听函数，当侦听属性的值发生变化时就会去
-    //执行副作用，active 为false 的唯一时机是 stop方法触发，就是上面这个stop函数，此时，侦听函数就会失去侦听的能力，即响应性失效
-    if (!effect.active) {
-      //scheduler 是自定义调度器，用来调度触发侦听函数，会看到如果侦听函数失效后，如果自定了调度器，那么会直接返回undefined来终止
-      //程序继续进行，如果没有自定义调度器，则执行源数据函数，这时候因为依赖都被移除掉了，因此是不会触发依赖收集操作，相当于执行了一次普通的
-      //函数调用而已
-      return options.scheduler ? undefined : fn()
-    }
-    //这里进行一次effectStack 中是否有 effect 判断的目的是为了防止同一个侦听函数被连续触发多次引起死递归。
-    //假如此时正在执行副作用函数，该函数内部有修改依赖属性的操作，修改会触发 trigger， 进而会再次触发侦听函数执行，
-    //然后副作用函数执行，这样当前的副作用函数就会无限递归下去，因此为了避免此现象发生，就会在副作用函数执行之前进行先一次判断。
-    //如果当前侦听函数还没有出栈，就啥也不执行。
-    if (!effectStack.includes(effect)) {
-      //cleanup 函数的作用有两个，1：会移除掉依赖映射表(targetMap)里面的effect侦听器函数（也叫依赖函数），2：清空effect侦听函数中的deps
-      //会发现 cleanup 操作是在每次即将执行副作用函数之前执行的，也就是在每次依赖重新收集之前会清空之前的依赖。这样做的目的是为了保证
-      //依赖属性时刻对应最新的侦听函数。
-      cleanup(effect)
-      try {
-        //当前effect侦听函数 入栈,并激活设置为 activeEffect
-        enableTracking()
-        effectStack.push(effect)
-        activeEffect = effect
-        //fn为副作用函数,若该函数里的响应式对象有属性的访问操作,则会触发getter,getter里会调用track()方法,进而实现依赖的重新收集
-        return fn()
-      } finally {
-        //副作用函数执行完后,当前effect副作用函数出栈,并撤销激活态
-        effectStack.pop()
-        resetTracking()
-        activeEffect = effectStack[effectStack.length - 1]
-      }
+//初始化一个侦听函数，函数本质也是对象，所以可以挂载/扩展一些有用的属性
+const effect = function reactiveEffect(): unknown {
+  //active 是 effect 侦听函数上扩展的一个属性，默认 active 为true,表示一个有效的侦听函数，当侦听属性的值发生变化时就会去
+  //执行副作用，active 为false 的唯一时机是 stop方法触发，就是上面这个stop函数，此时，侦听函数就会失去侦听的能力，即响应性失效
+  if (!effect.active) {
+    //scheduler 是自定义调度器，用来调度触发侦听函数，会看到如果侦听函数失效后，如果自定了调度器，那么会直接返回undefined来终止
+    //程序继续进行，如果没有自定义调度器，则执行源数据函数，这时候因为依赖都被移除掉了，因此是不会触发依赖收集操作，相当于执行了一次普通的
+    //函数调用而已
+    return options.scheduler ? undefined : fn()
+  }
+  //这里进行一次effectStack 中是否有 effect 判断的目的是为了防止同一个侦听函数被连续触发多次引起死递归。
+  //假如此时正在执行副作用函数，该函数内部有修改依赖属性的操作，修改会触发 trigger， 进而会再次触发侦听函数执行，
+  //然后副作用函数执行，这样当前的副作用函数就会无限递归下去，因此为了避免此现象发生，就会在副作用函数执行之前进行先一次判断。
+  //如果当前侦听函数还没有出栈，就啥也不执行。
+  if (!effectStack.includes(effect)) {
+    //cleanup 函数的作用有两个，1：会移除掉依赖映射表(targetMap)里面的effect侦听器函数（也叫依赖函数），2：清空effect侦听函数中的deps
+    //会发现 cleanup 操作是在每次即将执行副作用函数之前执行的，也就是在每次依赖重新收集之前会清空之前的依赖。这样做的目的是为了保证
+    //依赖属性时刻对应最新的侦听函数。
+    cleanup(effect)
+    try {
+      //当前effect侦听函数 入栈,并激活设置为 activeEffect
+      enableTracking()
+      effectStack.push(effect)
+      activeEffect = effect
+      //fn为副作用函数,若该函数里的响应式对象有属性的访问操作,则会触发getter,getter里会调用track()方法,进而实现依赖的重新收集
+      return fn()
+    } finally {
+      //副作用函数执行完后,当前effect副作用函数出栈,并撤销激活态
+      effectStack.pop()
+      resetTracking()
+      activeEffect = effectStack[effectStack.length - 1]
     }
   }
+}
 ```
-
-
-
