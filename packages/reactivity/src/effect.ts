@@ -1,34 +1,35 @@
+//操作数据的行为枚举常量
 import { TrackOpTypes, TriggerOpTypes } from './operations'
+//工具函数
 import { EMPTY_OBJ, isArray, isIntegerKey, isMap } from '@vue/shared'
 
 // The main WeakMap that stores {target -> key -> dep} connections.
 // Conceptually, it's easier to think of a dependency as a Dep class
 // which maintains a Set of subscribers, but we simply store them as
 // raw Sets to reduce memory overhead.
+
+//一些类型定义
 type Dep = Set<ReactiveEffect>
 type KeyToDepMap = Map<any, Dep>
 const targetMap = new WeakMap<any, KeyToDepMap>()
 
-//定义effect类型
 export interface ReactiveEffect<T = any> {
-  (): T //ReactiveEffect函数
-  _isEffect: true //用来标识是effect类型
-  id: number //id号
-  active: boolean //active是激活effect的开关，打开会收集依赖，关闭会导致收集依赖无效
-  raw: () => T // 侦听函数的原始函数
-  deps: Array<Dep> // 存储依赖(effect)的deps
-  options: ReactiveEffectOptions // 相关选项
-  allowRecurse: boolean //是否允许递归
+  (): T 
+  _isEffect: true 
+  id: number 
+  active: boolean
+  raw: () => T
+  deps: Array<Dep> 
+  options: ReactiveEffectOptions 
+  allowRecurse: boolean
 }
-
-//定义effectOptions类型
 export interface ReactiveEffectOptions {
-  lazy?: boolean // 延迟计算的标识(默认false,开启的话,effect函数不会立刻执行一次,会延迟到依赖关系被触发时才执行)
-  scheduler?: (job: ReactiveEffect) => void // 自定义的依赖收集函数，一般用于外部引入@vue/reactivity时使用
-  onTrack?: (event: DebuggerEvent) => void // 本地调试钩子(仅在开发模式下生效)
-  onTrigger?: (event: DebuggerEvent) => void // 本地调试钩子(仅在开发模式下生效)
-  onStop?: () => void //本地调试时钩子(仅在开发模式下生效)
-  allowRecurse?: boolean //是否允许递归
+  lazy?: boolean 
+  scheduler?: (job: ReactiveEffect) => void 
+  onTrack?: (event: DebuggerEvent) => void 
+  onTrigger?: (event: DebuggerEvent) => void 
+  onStop?: () => void 
+  allowRecurse?: boolean
 }
 
 //debugger 事件
@@ -46,9 +47,9 @@ export interface DebuggerEventExtraInfo {
   oldTarget?: Map<any, any> | Set<any>
 }
 
-//effectStack用于存放所有effect的数组
+
 const effectStack: ReactiveEffect[] = []
-//当前被激活的effect
+
 let activeEffect: ReactiveEffect | undefined
 
 export const ITERATE_KEY = Symbol(__DEV__ ? 'iterate' : '')
@@ -88,7 +89,6 @@ export function stop(effect: ReactiveEffect) {
   if (effect.active) {
     // 清除effect的所有依赖
     cleanup(effect)
-    // 如果有onStop钩子，调用该钩子函数(会最为选项参数传入)
     if (effect.options.onStop) {
       effect.options.onStop()
     }
@@ -118,7 +118,7 @@ function createReactiveEffect<T = any>(
     //假如此时正在执行副作用函数，该函数内部有修改依赖属性的操作，修改会触发 trigger， 进而会再次触发侦听函数执行，
     //然后副作用函数执行，这样当前的副作用函数就会无限递归下去，因此为了避免此现象发生，就会在副作用函数执行之前进行先一次判断。
     //如果当前侦听函数还没有出栈，就啥也不执行。
-    if (true) {
+    if (!effectStack.includes(effect)) {
       //cleanup 函数的作用有两个，1：会移除掉依赖映射表(targetMap)里面的effect侦听器函数（也叫依赖函数），2：清空effect侦听函数中的deps
       //会发现 cleanup 操作是在每次即将执行副作用函数之前执行的，也就是在每次依赖重新收集之前会清空之前的依赖。这样做的目的是为了保证
       //依赖属性时刻对应最新的侦听函数。
@@ -159,7 +159,7 @@ function cleanup(effect: ReactiveEffect) {
     deps.length = 0
   }
 }
-//全局开关变量，默认打开track，如果关闭track，则会导致 Vue 内部停止对变化进行追踪
+
 let shouldTrack = true
 const trackStack: boolean[] = []
 
@@ -177,6 +177,7 @@ export function resetTracking() {
   const last = trackStack.pop()
   shouldTrack = last === undefined ? true : last
 }
+
 //依赖收集函数，当响应式数据属性被访问时该函数会被触发,从而收集有关访问属性的侦听函数（也叫依赖函数）effect
 //target:原始目标对象（代理对象所对应的原始对象），type: 操作类型，key：访问属性名
 export function track(target: object, type: TrackOpTypes, key: unknown) {
