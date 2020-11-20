@@ -635,7 +635,7 @@ export function trigger(
   }
 ```
 
-即使将等于 `activeEffect`的 `effect` 添加进了 `effects` 集合中，然后到了执行该侦听函数这一步，也会被上面这个 if 条件拦住，所以个人感觉 `allowRecurse` 这个属性是多余的。那此时也衍生出两个个问题，什么时候 `effect` 等于 `activeEffect` ？如果不加 if 判断拦截，结果如何？这两个问题先不急，等下面分析到 effect 函数执行的时候就明白了。
+即使将等于 `activeEffect`的 `effect` 添加进了 `effects` 集合中，然后到了执行该侦听函数这一步，也会被上面这个 if 条件拦住，所以个人感觉 `allowRecurse` 这个属性是多余的。那此时也衍生出两个个问题，**什么时候 effect 等于 activeEffect ？** **如果不加 if 判断拦截，结果如何？** 这两个问题先不急，等下面分析到 effect 函数执行的时候就明白了。
 
 下来是一系列对传入的 `type` 操作类型和 `key` 键名的判断，最终目的是将对应的 `dep` 依赖集合添加进 `effects` 集合中，基本也没啥太多好说的，只不过有一个点需要注意下，就是这里：
 
@@ -677,11 +677,11 @@ switch (type) {
 }
 ```
 
-通过判断三种不同 `type` 类型 ，然后去将迭代依赖添加进 effects 集合中，然后去更新它，那么为啥需要更新迭代依赖呢？这些依赖什么时候收集的呢？
+通过判断三种不同 `type` 类型 ，然后去将迭代依赖添加进 effects 集合中，然后去更新它，那么**为啥需要更新迭代依赖呢？这些依赖什么时候收集的呢？**
 首先先说收集的地方。
 
-- 1. baseHandlers.ts -> ownKeys 捕获方法中，这个方法被触发的时机是监听到 Object.keys()被调用。
-- 2. collectionHandlers.ts -> 插装方法 size，迭代方法 ['keys', 'values', 'entries',forEach, Symbol.iterator]中。获取集合长度.size 时触发 size 方法，调用 Map,Set 集合的迭代方法（keys,values,entries,forEach,for...of 等）。
+- baseHandlers.ts -> ownKeys 捕获方法中，这个方法被触发的时机是监听到 Object.keys()被调用。
+- collectionHandlers.ts -> 插装方法 size，迭代方法 ['keys', 'values', 'entries',forEach, Symbol.iterator]中。获取集合长度.size 时触发 size 方法，调用 Map,Set 集合的迭代方法（keys,values,entries,forEach,for...of 等）。
 
 如果你仔细分析这里每种类型 case 下的判断条件会发现不同类型的操作都会对其下的依赖产生影响。我们来举个例子吧；
 
@@ -819,7 +819,7 @@ const effect = function reactiveEffect(): unknown {
 }
 ```
 
-第一步对当前执行的侦听函数响应状态进行判断，只有具有响应性的侦听函数才可以被调度执行。那什么时候失去响应性呢？就是 stop（用来显式停止侦听）方法被调用时，或者组件卸载时。第二步对 `effectStack` 中是否已经存在即将要执行的 `effect` 判断，这一步的目的是为了防止同一个侦听函数被连续触发多次引起死递归。还记得上面当我我们抛出来的两个问题吗？ `什么时候`effect`等于`activeEffect`？如果不加 if 判断拦截，结果如何`。那现在我们就来分析分析。还是先举个栗子吧。
+第一步对当前执行的侦听函数响应状态进行判断，只有具有响应性的侦听函数才可以被调度执行。那什么时候失去响应性呢？就是 stop（用来显式停止侦听）方法被调用时，或者组件卸载时。第二步对 `effectStack` 中是否已经存在即将要执行的 `effect` 判断，这一步的目的是为了防止同一个侦听函数被连续触发多次引起死递归。还记得上面当我我们抛出来的两个问题吗？ **什么时候 effect 等于 activeEffect ？** **如果不加 if 判断拦截，结果如何** 。那现在我们就来分析分析。还是先举个栗子吧。
 
 ```js
 it('could control implicit infinite recursive loops with itself when options.allowRecurse is true', () => {
