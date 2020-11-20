@@ -818,16 +818,43 @@ const effect = function reactiveEffect(): unknown {
   }
 }
 ```
-第一步对当前执行的侦听函数响应状态进行判断，只有具有响应性的侦听函数才可以被调度执行。那什么时候失去响应性呢？就是 stop（用来显式停止侦听）方法被调用时，或者组件卸载时。第二步对 `effectStack` 中是否已经存在即将要执行的 `effect ` 判断，这一步的目的是为了防止同一个侦听函数被连续触发多次引起死递归。还记得上面当我我们抛出来的两个问题吗？ `什么时候 `effect` 等于 `activeEffect` ？如果不加 if 判断拦截，结果如何`。那现在我们就来分析分析。还是先举个栗子吧。
+
+第一步对当前执行的侦听函数响应状态进行判断，只有具有响应性的侦听函数才可以被调度执行。那什么时候失去响应性呢？就是 stop（用来显式停止侦听）方法被调用时，或者组件卸载时。第二步对 `effectStack` 中是否已经存在即将要执行的 `effect` 判断，这一步的目的是为了防止同一个侦听函数被连续触发多次引起死递归。还记得上面当我我们抛出来的两个问题吗？ `什么时候`effect`等于`activeEffect`？如果不加 if 判断拦截，结果如何`。那现在我们就来分析分析。还是先举个栗子吧。
 
 ```js
+it('could control implicit infinite recursive loops with itself when options.allowRecurse is true', () => {
+  const counter = reactive({ num: 0 })
 
-  it('should control implicit infinite recursive loops with itself when options.allowRecurse is true', () => {
-    const counter = reactive({ num: 0 })
-
-    const counterSpy = jest.fn(() => counter.num++)
-    effect(counterSpy,{allowRecurse: true})
-    expect(counter.num).toBe(1)
-  })
-
+  const counterSpy = jest.fn(() => counter.num++)
+  effect(counterSpy, { allowRecurse: true })
+  expect(counter.num).toBe(1)
+})
 ```
+
+这个单测栗子用来测试将 `!effectStack.includes(effect)` 判断去掉会发生神马情况，我们将 if 判断改成 true，然后 run 单测
+实例会发现报错: `RangeError: Maximum call stack size exceeded` （堆栈溢出）。这个就是如果不加 if 判断导致的结果了。那是如何发生的呢，我们
+来分析下单测实例执行。
+定义一个响应式对象 `counter` 调用 `effect` 函数，执行初始化，侦听函数初始化完成会立即执行一次。if 判断为 true ，直接进来，副作用函数 fn
+执行前都先执行一次 `cleanup`操作。 `cleanup` 方法内部我们来看下:
+
+```js
+// 清除依赖，该方法会在侦听函数每次将要执行副作用函数前或触发stop()函数时调用，用来清除依赖的
+function cleanup(effect: ReactiveEffect) {
+  const { deps } = effect
+  if (deps.length) {
+    for (let i = 0; i < deps.length; i++) {
+      deps[i].delete(effect)
+    }
+    deps.length = 0
+  }
+}
+```
+
+effect 侦听函数上挂载了一个 deps 属性，这个属性保存的是所有包含该侦听函数的 `dep` 集合，这样在侦听函数和依赖集合之前建立了一个双向映射的关系，
+所以，当遍历 `deps`，移除掉每一个 `dep` 里的 `effect` 后，依赖集合里面的该侦听函数也就被移除掉了。从而实现清除依赖的目的。
+先清除掉依赖后，下来将正在执行的 `effect` 侦听函数推入 `effectStack` 中，称为入栈， 并将其设置为激活态 `activeEffect` ，然后去执行副作用函数，单测实例这里这个副作用函数就是 `() => counter.num++` ，该函数内部是一个 `counter.num` 自增操作，先获取属性，触发一次 `gettter`，进而将依赖重新收集回来，这里就可以跟刚才的清除依赖呼应起来了，**每一次重新执行副作用之前将先前的依赖全部清除掉的作用就是为了保证依赖的最新性**。下来自增
+操作时一个修改操作，因此会触发 `setter` 进而去触发依赖更新，那此时副作用函数还没有执行完成，`activeEffect` 仍然是这个 effect，当再次执行副作用
+函数进来又会走到我们 的 if 判断，这个时候如果没有 `!effectStack.includes(effect)` 判断条件，就会继续重复上步流程，这样就陷入了侦听函数内部的
+隐式递归，因此这个 if 判断是很关键的，它的作用就是为了**避免侦听函数内部的隐式递归** ，此时刚才那两个问题的答案就呼之欲出了吧。
+
+伴随着单测实例，副作用函数内部的执行过程也分析完了，同时 effect 篇的内容也就全部分析完了，此时的感受就一句话，**写了好多字，哈哈哈**

@@ -362,7 +362,7 @@ describe('reactivity/effect', () => {
   //这是我自己写的用来测试 options.allowRecurse 的单测实例 ，因此可以忽略掉
   //这个单测实例，表明 options.allowRecurse = true 并不能控制 effect 递归，所以，源代码中这个属性个人感觉没有用
   //不知是否是个bug呢？
-  it('should control implicit infinite recursive loops with itself when options.allowRecurse is true', () => {
+  it('could control implicit infinite recursive loops with itself when options.allowRecurse is true', () => {
     const counter = reactive({ num: 0 })
 
     const counterSpy = jest.fn(() => counter.num++)
