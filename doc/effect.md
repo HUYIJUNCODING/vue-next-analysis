@@ -818,3 +818,16 @@ const effect = function reactiveEffect(): unknown {
   }
 }
 ```
+第一步对当前执行的侦听函数响应状态进行判断，只有具有响应性的侦听函数才可以被调度执行。那什么时候失去响应性呢？就是 stop（用来显式停止侦听）方法被调用时，或者组件卸载时。第二步对 `effectStack` 中是否已经存在即将要执行的 `effect ` 判断，这一步的目的是为了防止同一个侦听函数被连续触发多次引起死递归。还记得上面当我我们抛出来的两个问题吗？ `什么时候 `effect` 等于 `activeEffect` ？如果不加 if 判断拦截，结果如何`。那现在我们就来分析分析。还是先举个栗子吧。
+
+```js
+
+  it('should control implicit infinite recursive loops with itself when options.allowRecurse is true', () => {
+    const counter = reactive({ num: 0 })
+
+    const counterSpy = jest.fn(() => counter.num++)
+    effect(counterSpy,{allowRecurse: true})
+    expect(counter.num).toBe(1)
+  })
+
+```

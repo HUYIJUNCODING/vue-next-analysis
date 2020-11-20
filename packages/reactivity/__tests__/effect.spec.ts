@@ -20,11 +20,11 @@ describe('reactivity/effect', () => {
   it('should observe basic properties', () => {
     let dummy
     const counter = reactive({ num: 0 })
-    effect(() => {dummy = counter.num;counter.num++},{allowRecurse: true})
+    effect(() => (dummy = counter.num))
 
     expect(dummy).toBe(0)
-    // counter.num = 7
-    // expect(dummy).toBe(7)
+    counter.num = 7
+    expect(dummy).toBe(7)
   })
 
   it('should observe multiple properties', () => {
@@ -356,6 +356,18 @@ describe('reactivity/effect', () => {
     counter.num = 4
     expect(counter.num).toBe(5)
     expect(counterSpy).toHaveBeenCalledTimes(2)
+  })
+
+  //it is myself write to test options.allowRecurse ,so it can be ignored
+  //这是我自己写的用来测试 options.allowRecurse 的单测实例 ，因此可以忽略掉
+  //这个单测实例，表明 options.allowRecurse = true 并不能控制 effect 递归，所以，源代码中这个属性个人感觉没有用
+  //不知是否是个bug呢？
+  it('should control implicit infinite recursive loops with itself when options.allowRecurse is true', () => {
+    const counter = reactive({ num: 0 })
+
+    const counterSpy = jest.fn(() => counter.num++)
+    effect(counterSpy,{allowRecurse: true})
+    expect(counter.num).toBe(1)
   })
 
   it('should avoid infinite recursive loops when use Array.prototype.push/unshift/pop/shift', () => {
