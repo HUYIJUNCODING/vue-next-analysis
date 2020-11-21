@@ -1,13 +1,13 @@
-### 源码调试前的准备工作
-#### 1. git clone git@github.com:vuejs/vue-next.git 将 vue-next 源代码克隆至本地
+# 源码调试前的准备工作
+## 1. git clone git@github.com:vuejs/vue-next.git 将 vue-next 源代码克隆至本地
 
-#### 2. 项目根目录 yarn install 安装依赖包
+## 2. 项目根目录 yarn install 安装依赖包
 * 安装依赖要用 `yarn install` ,使用 `npm install /cnpm install `安装依赖包会报错
 * 这里需要注意的是安装依赖对 `node` 版本有要求,笔者开始使用 `v12.18.3` 版本会安装依赖报错,然后升级至 `12.19.0` 就安装成功了(推荐使用 `nvm` 进行 `node` 版本管理)
 
-#### 3. npm run dev 本地启动项目
+## 3. npm run dev 本地启动项目
 
-#### 4. 安装 Jest Runner 插件 + debugger 打断点调试
+## 4. 安装 Jest Runner 插件 + debugger 打断点调试
 
 * `vscode` (安装插件很方便,调试也很方便,`ts` 支持友好)
 * 可以采用调试单测实例的方式调试源码,每一个模块下都有一个`__tests__` 文件夹,存放的就是该模块所有的单测实例,安装了`Jest Runner` 插件后,在目标位置打上断点,点击 `Debug` 按钮,一路点点点即可
