@@ -11,7 +11,7 @@
 
 先找到这哥俩的位置
 
-### watchEffect(watch)
+### watchEffect/watch
 
 ```js
 // Simple effect.
@@ -496,8 +496,8 @@ WeakMap<Target, Map<string | symbol, Set<ReactiveEffect>>>
 然后说一个小细节`activeEffect.deps.push(dep)` ，会发现最后也会将 `dep` 往每一个 `effect` 的 `deps` 数组中存入一份，这个操作有啥作用呢？
 不卖关子了，就直接说了，其实这一步目的是在每一个侦听函数和依赖映射表间建立了一个双向映射关系，这个双向映射关系会在每次副作用函数即将执行前的 `cleanup` 操作发挥作用。会将先前收集进 `depsMap` 里所有访问属性的 `dep` 集合中该侦听函数（依赖函数）移除掉。然后在执行副作用函数的时候再次执行 `track` 时重新收集回来，这样的操作看似有点蛋疼，但经过细品后的确不是蛋疼行为，这是为了保证依赖的最新性而有意为之。
 
-### 依赖更新
-#### trigger
+## 依赖更新
+### trigger
 
 分析完了依赖收集后，下来就是触发依赖更新了，我们来看下执行过程, `trigger` 方法有点略长，哈哈哈。
 
